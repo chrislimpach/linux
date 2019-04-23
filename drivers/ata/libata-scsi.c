@@ -1170,11 +1170,14 @@ static int ata_scsi_dev_config(struct scsi_device *sdev,
 
 	blk_queue_flush_queueable(q, false);
 
-	/* AHCI disk link rate support */
-	sata_scr_read(link, SCR_STATUS, &sstatus);
-	tmp = ((sstatus >> 4) & 0xf);
-	if (tmp > 0) tmp = tmp - 1;
-		sdev->link_rate=tmp;
+        if (sdev->host->host_no <= 5) { /* not on eSATA, probably only
+                                         * correct on n5550 */
+                /* AHCI disk link rate support */
+                sata_scr_read(link, SCR_STATUS, &sstatus);
+                tmp = ((sstatus >> 4) & 0xf);
+                if (tmp > 0) tmp = tmp - 1;
+                sdev->link_rate=tmp;
+        }
 
 	dev->sdev = sdev;
 	return 0;
