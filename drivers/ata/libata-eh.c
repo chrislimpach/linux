@@ -3624,10 +3624,10 @@ static int ata_eh_schedule_probe(struct ata_device *dev)
 	ata_ering_record(&dev->ering, 0, AC_ERR_OTHER);
 	ata_ering_map(&dev->ering, ata_count_probe_trials_cb, &trials);
 
-	/* dont reset speed limit on probe error 
+	/* dont reset speed limit on probe error */
 	if (trials > ATA_EH_PROBE_TRIALS)
 		sata_down_spd_limit(link, 1);
-	*/
+	/* */
 
 	return 1;
 }
