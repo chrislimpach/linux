@@ -1718,7 +1718,13 @@ restart_locked:
 			goto out_unlock;
 	}
 
-	if (unlikely(unix_peer(other) != sk && unix_recvq_full(other))) {
+	/* other == sk && unix_peer(other) != sk if
+	 * - unix_peer(sk) == NULL, destination address bound to sk
+	 * - unix_peer(sk) == sk by time of get but disconnected before lock
+	 */
+	if (other != sk &&
+	    unlikely(unix_peer(other) != sk && unix_recvq_full(other))) {
+
 		if (timeo) {
 			timeo = unix_wait_for_peer(other, timeo);
 
@@ -1747,7 +1753,7 @@ restart_locked:
 		}
 	}
 
-	if (unlikely(sk_locked))
+	if (unlikely(sk_locked) && sk != other)
 		unix_state_unlock(sk);
 
 	if (sock_flag(other, SOCK_RCVTSTAMP))
@@ -1763,7 +1769,7 @@ restart_locked:
 	return len;
 
 out_unlock:
-	if (sk_locked)
+	if (sk_locked && sk != other)
 		unix_state_unlock(sk);
 	unix_state_unlock(other);
 out_free:

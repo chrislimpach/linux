@@ -30,6 +30,8 @@
 #include "raid0.h"
 #include "bitmap.h"
 
+#include <linux/thecus_event.h>
+
 /*
  * RAID10 provides a combination of RAID0 and RAID1 functionality.
  * The layout of data is defined by
@@ -1699,6 +1701,9 @@ static void error(struct mddev *mddev, struct md_rdev *rdev)
 	       "md/raid10:%s: Operation continuing on %d devices.\n",
 	       mdname(mddev), bdevname(rdev->bdev, b),
 	       mdname(mddev), conf->geo.raid_disks - mddev->degraded);
+
+	/* Thecus md Event patch */
+	criticalevent_user(RAID_DISK_FAIL,bdevname(rdev->bdev,b)); 
 }
 
 static void print_conf(struct r10conf *conf)

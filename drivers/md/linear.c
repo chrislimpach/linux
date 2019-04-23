@@ -24,6 +24,8 @@
 #include "md.h"
 #include "linear.h"
 
+#include <linux/thecus_event.h>
+
 /*
  * find which device holds a particular offset 
  */
@@ -226,6 +228,10 @@ static int linear_run (struct mddev *mddev)
 		kfree(conf);
 		mddev->private = NULL;
 	}
+
+	/* Thecus md Event patch */
+	check_raid_status(mddev,RAID_STATUS_HEALTHY);
+
 	return ret;
 }
 

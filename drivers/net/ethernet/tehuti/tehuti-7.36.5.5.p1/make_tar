@@ -1,0 +1,26 @@
+#!/bin/bash
+
+DRV_NAME=tehuti
+
+COPY_LIST1="${DRV_NAME}.c ${DRV_NAME}*.h Makefile  make_tar README*  sysctl.conf"
+COPY_LIST2="sysinfo get-distro.sh init-rps tinstall"
+COPY_LIST="$COPY_LIST1 $COPY_LIST2"
+
+
+VER=`grep BDX_DRV_VERSION ${DRV_NAME}.h | sed -e 's/^[^"]*\"//'  -e 's/"//'`
+
+
+TGD="/tmp/${DRV_NAME}-$$"
+TGN="${DRV_NAME}-${VER}"
+TGDD="$TGD/$TGN"
+echo "packing version ${VER}"
+rm -rf  $TGD
+mkdir $TGD
+mkdir $TGDD
+cp ${COPY_LIST} $TGDD
+cd $TGD
+tar zcvf /tmp/${TGN}.tgz ${TGN};
+rm -rf  $TGD
+echo
+ls -l /tmp/${TGN}.tgz
+echo

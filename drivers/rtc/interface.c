@@ -361,10 +361,16 @@ static int __rtc_set_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 int rtc_set_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 {
 	int err;
+	unsigned long ttime,tmtime=0;
 
 	err = rtc_valid_tm(&alarm->time);
 	if (err != 0)
 		return err;
+
+	/* Thecus patch modify set alarm with time zone */
+	rtc_tm_to_time(&alarm->time, &ttime);
+	tmtime = ttime + (sys_tz.tz_minuteswest * 60);
+	rtc_time_to_tm(tmtime,&alarm->time);
 
 	err = mutex_lock_interruptible(&rtc->ops_lock);
 	if (err)

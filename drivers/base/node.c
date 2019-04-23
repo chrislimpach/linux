@@ -494,6 +494,8 @@ static int link_mem_sections(int nid)
 			err = ret;
 
 		/* discard ref obtained in find_memory_block() */
+		touch_nmi_watchdog();
+		cond_resched();
 	}
 
 	if (mem_blk)

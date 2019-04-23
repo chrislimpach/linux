@@ -120,6 +120,10 @@ static char *ipmi_addr_src_to_str[] = { NULL, "hotmod", "hardcoded", "SPMI",
 
 static struct platform_driver ipmi_driver;
 
+/* 0 => Doesn't find IPMI interface; 1 => Find IPMI interface */
+int has_ipmi_intf = 0;
+EXPORT_SYMBOL(has_ipmi_intf);
+
 /*
  * Indexes into stats[] in smi_info below.
  */
@@ -3433,6 +3437,9 @@ static int try_smi_init(struct smi_info *new_smi)
 
 	dev_info(new_smi->dev, "IPMI %s interface initialized\n",
 		 si_to_str[new_smi->si_type]);
+
+	/* If IPMI interface has been initialized, then this value should be set to 1. */
+	has_ipmi_intf = 1;
 
 	return 0;
 

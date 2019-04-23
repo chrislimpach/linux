@@ -61,6 +61,8 @@
 #include "raid0.h"
 #include "bitmap.h"
 
+#include <linux/thecus_event.h>
+
 #define cpu_to_group(cpu) cpu_to_node(cpu)
 #define ANY_GROUP NUMA_NO_NODE
 
@@ -73,7 +75,7 @@ static struct workqueue_struct *raid5_wq;
  * Stripe cache
  */
 
-#define NR_STRIPES		256
+#define NR_STRIPES		4096 /* for raid5 write speed */
 #define STRIPE_SIZE		PAGE_SIZE
 #define STRIPE_SHIFT		(PAGE_SHIFT - 9)
 #define STRIPE_SECTORS		(STRIPE_SIZE>>9)
@@ -749,9 +751,11 @@ static void ops_run_io(struct stripe_head *sh, struct stripe_head_state *s)
 		struct bio *bi, *rbi;
 		struct md_rdev *rdev, *rrdev = NULL;
 		if (test_and_clear_bit(R5_Wantwrite, &sh->dev[i].flags)) {
+			/* turn off raid5 FUA for iSCSI hanging problem
 			if (test_and_clear_bit(R5_WantFUA, &sh->dev[i].flags))
 				rw = WRITE_FUA;
 			else
+			*/
 				rw = WRITE;
 			if (test_bit(R5_Discard, &sh->dev[i].flags))
 				rw |= REQ_DISCARD;
@@ -2189,6 +2193,8 @@ static void error(struct mddev *mddev, struct md_rdev *rdev)
 	       bdevname(rdev->bdev, b),
 	       mdname(mddev),
 	       conf->raid_disks - mddev->degraded);
+	/* Thecus md Event patch */
+	criticalevent_user(RAID_DISK_FAIL,bdevname(rdev->bdev,b));
 }
 
 /*

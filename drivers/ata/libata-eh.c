@@ -113,7 +113,11 @@ static const unsigned long ata_eh_identify_timeouts[] = {
 };
 
 static const unsigned long ata_eh_flush_timeouts[] = {
-	15000,	/* be generous with flush */
+	/* 
+	 * Change libata flush timeout value from 15 seconds to 30 seconds,
+	 * this may improve hdd io error issue
+	 */
+	30000,	/* be generous with flush */
 	15000,  /* ditto */
 	30000,	/* and even more generous */
 	ULONG_MAX,
@@ -3620,8 +3624,10 @@ static int ata_eh_schedule_probe(struct ata_device *dev)
 	ata_ering_record(&dev->ering, 0, AC_ERR_OTHER);
 	ata_ering_map(&dev->ering, ata_count_probe_trials_cb, &trials);
 
+	/* dont reset speed limit on probe error 
 	if (trials > ATA_EH_PROBE_TRIALS)
 		sata_down_spd_limit(link, 1);
+	*/
 
 	return 1;
 }

@@ -893,6 +893,10 @@ struct ata_port_operations {
 	unsigned int (*qc_issue)(struct ata_queued_cmd *qc);
 	bool (*qc_fill_rtf)(struct ata_queued_cmd *qc);
 
+	/* thecus_event patch/Intf:{SATA/SAS/USB/iSCSI/FCoE/JBOD} */
+	struct ata_queued_cmd* (*qc_new)(struct ata_port *ap);
+	void (*qc_free)(struct ata_queued_cmd *qc);
+
 	/*
 	 * Configuration and exception handling
 	 */

@@ -87,6 +87,18 @@ config GPIO_GENERIC
 
 # put drivers in the right section, in alphabetical order
 
+config GPIO_CHERRYVIEW
+        bool "Intel CherryView GPIO support"
+        select IRQ_DOMAIN
+        help
+          This driver is for Intel CherryView.
+          Cherryview GPIO controllers provide electrical control and
+          functional muxing between all units and the GPIOs/CFIOs in
+          CHV SoC.
+
+          Say Y here to support Intel CherryView GPIO.
+
+
 config GPIO_DA9052
 	tristate "Dialog DA9052 GPIO"
 	depends on PMIC_DA9052

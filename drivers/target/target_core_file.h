@@ -1,6 +1,8 @@
 #ifndef TARGET_CORE_FILE_H
 #define TARGET_CORE_FILE_H
 
+#include <asm/page.h>
+
 #define FD_VERSION		"4.0"
 
 #define FD_MAX_DEV_NAME		256
@@ -9,9 +11,9 @@
 #define FD_MAX_DEVICE_QUEUE_DEPTH 128
 #define FD_BLOCKSIZE		512
 /*
- * Limited by the number of iovecs (2048) per vfs_[writev,readv] call
+ * Limited by the number of iovecs (1024) per vfs_[writev,readv] call
  */
-#define FD_MAX_BYTES		8388608
+#define FD_MAX_BYTES		(1024*PAGE_SIZE)
 
 #define RRF_EMULATE_CDB		0x01
 #define RRF_GOT_LBA		0x02

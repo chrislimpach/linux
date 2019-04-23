@@ -280,6 +280,9 @@ static struct scsi_host_template fcoe_shost_template = {
 	.eh_device_reset_handler = fc_eh_device_reset,
 	.eh_host_reset_handler = fc_eh_host_reset,
 	.slave_alloc = fc_slave_alloc,
+	/* Thecus /proc/scsi/scsi FCoE Interface */
+	.slave_configure = fc_slave_configure,
+
 	.change_queue_depth = fc_change_queue_depth,
 	.change_queue_type = fc_change_queue_type,
 	.this_id = -1,

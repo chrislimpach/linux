@@ -44,6 +44,13 @@ config MD_AUTODETECT
 
 	  If unsure, say Y.
 
+config EVENT_THECUS		
+	bool "Thecus Event from proc "
+	---help---
+	  Say Y here to support thecus event in proc entry.
+	  About the show event function ,will be show event
+	  by /proc/thecus_eventc.
+
 config MD_LINEAR
 	tristate "Linear (append) mode"
 	depends on BLK_DEV_MD

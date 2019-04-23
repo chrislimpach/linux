@@ -46,7 +46,7 @@ struct xfs_acl {
 	(xfs_sb_version_hascrc(&mp->m_sb) \
 		?  (XATTR_SIZE_MAX - sizeof(struct xfs_acl)) / \
 						sizeof(struct xfs_acl_entry) \
-		: 25)
+		: 310)	/* change XFS_ACL_MAX_ENTRIES from 25 to 310 */
 
 #define XFS_ACL_MAX_SIZE(mp) \
 	(sizeof(struct xfs_acl) + \

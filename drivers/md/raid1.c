@@ -41,6 +41,8 @@
 #include "raid1.h"
 #include "bitmap.h"
 
+#include <linux/thecus_event.h>
+
 /*
  * Number of guaranteed r1bios in case of extreme VM load:
  */
@@ -1514,6 +1516,9 @@ static void error(struct mddev *mddev, struct md_rdev *rdev)
 	       "md/raid1:%s: Operation continuing on %d devices.\n",
 	       mdname(mddev), bdevname(rdev->bdev, b),
 	       mdname(mddev), conf->raid_disks - mddev->degraded);
+
+	/* Thecus md Event patch */
+	criticalevent_user(RAID_DISK_FAIL,bdevname(rdev->bdev,b));
 }
 
 static void print_conf(struct r1conf *conf)

@@ -1353,7 +1353,7 @@ static int __iscsi_target_login_thread(struct iscsi_np *np)
 
 	conn->network_transport = np->np_network_transport;
 
-	pr_debug("Received iSCSI login request from %s on %s Network"
+	printk(KERN_INFO "Received iSCSI login request from %s on %s Network"
 		" Portal %s:%hu\n", conn->login_ip, np->np_transport->name,
 		conn->local_ip, conn->local_port);
 
@@ -1424,6 +1424,13 @@ static int __iscsi_target_login_thread(struct iscsi_np *np)
 		tpg_np = conn->tpg_np;
 
 		iscsi_post_login_handler(np, conn, zero_tsih);
+
+		if ((conn->login_ip) && (conn->sess) && (conn->sess->sess_ops) && (conn->sess->sess_ops->TargetName) && (conn->sess->sess_ops->InitiatorName)) {
+			printk(KERN_DEBUG "iSCSI login. |%s|%s|%s\n", conn->login_ip, conn->sess->sess_ops->TargetName,conn->sess->sess_ops->InitiatorName);
+		} else {
+			printk(KERN_DEBUG "iSCSI login. |||\n");
+		}
+
 		iscsit_deaccess_np(np, tpg, tpg_np);
 	}
 

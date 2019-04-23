@@ -1409,8 +1409,88 @@ out:
 
 TF_TPG_BASE_ATTR(lio_target, enable, S_IRUGO | S_IWUSR);
 
+static ssize_t lio_target_tpg_show_info(
+	struct se_portal_group *se_tpg,
+	char *page)
+{
+	struct se_node_acl *se_nacl, *se_nacl_tmp;
+	struct se_session *se_sess;
+	struct iscsi_session *sess;
+	struct iscsi_conn *conn;
+	bool first_entry = true;
+	ssize_t rb = 0;
+
+	list_for_each_entry_safe(se_nacl, se_nacl_tmp, &se_tpg->acl_node_list,
+				 acl_list) {
+		spin_lock_bh(&se_nacl->nacl_sess_lock);
+
+		se_sess = se_nacl->nacl_sess;
+		if (!se_sess) {
+			spin_unlock_bh(&se_nacl->nacl_sess_lock);
+			continue;
+		}
+
+		if (first_entry)
+			first_entry = false;
+		else
+			rb += sprintf(page+rb, "\n");
+
+		sess = se_sess->fabric_sess_ptr;
+
+		if (sess->sess_ops->InitiatorName)
+			rb += sprintf(page+rb, "InitiatorName: %s\n",
+				      sess->sess_ops->InitiatorName);
+		if (sess->sess_ops->InitiatorAlias)
+			rb += sprintf(page+rb, "InitiatorAlias: %s\n",
+				      sess->sess_ops->InitiatorAlias);
+
+                rb += sprintf(page+rb, "Session State: ");
+                switch (sess->session_state) {
+                case TARG_SESS_STATE_FREE:
+                        rb += sprintf(page+rb, "TARG_SESS_FREE\n");
+                        break;
+                case TARG_SESS_STATE_ACTIVE:
+                        rb += sprintf(page+rb, "TARG_SESS_STATE_ACTIVE\n");
+                        break;
+                case TARG_SESS_STATE_LOGGED_IN:
+                        rb += sprintf(page+rb, "TARG_SESS_STATE_LOGGED_IN\n");
+                        break;
+                case TARG_SESS_STATE_FAILED:
+                        rb += sprintf(page+rb, "TARG_SESS_STATE_FAILED\n");
+                        break;
+                case TARG_SESS_STATE_IN_CONTINUE:
+                        rb += sprintf(page+rb, "TARG_SESS_STATE_IN_CONTINUE\n");
+                        break;
+                default:
+                        rb += sprintf(page+rb, "ERROR: Unknown Session"
+                                        " State!\n");
+                        break;
+                }
+
+		spin_lock(&sess->conn_lock);
+		list_for_each_entry(conn, &sess->sess_conn_list, conn_list) {
+                        rb += sprintf(page+rb, "CID: %hu\n", conn->cid);
+
+			rb += sprintf(page+rb, "   Address %s %s", conn->login_ip,
+				(conn->network_transport == ISCSI_TCP) ?
+				"TCP" : "SCTP");
+			rb += sprintf(page+rb, "  StatSN: 0x%08x\n",
+				conn->stat_sn);
+		}
+
+		spin_unlock(&sess->conn_lock);
+
+		spin_unlock_bh(&se_nacl->nacl_sess_lock);
+	}
+
+	return rb;
+}
+
+TF_TPG_BASE_ATTR_RO(lio_target, info);
+
 static struct configfs_attribute *lio_target_tpg_attrs[] = {
 	&lio_target_tpg_enable.attr,
+	&lio_target_tpg_info.attr,
 	NULL,
 };
 

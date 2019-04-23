@@ -26,6 +26,8 @@
 #include "raid0.h"
 #include "raid5.h"
 
+#include <linux/thecus_event.h>
+
 static int raid0_congested(void *data, int bits)
 {
 	struct mddev *mddev = data;
@@ -476,8 +478,12 @@ static int raid0_run(struct mddev *mddev)
 	dump_zones(mddev);
 
 	ret = md_integrity_register(mddev);
-	if (ret)
+	if (ret){
 		raid0_stop(mddev);
+	}else{
+		/* Thecus md Event patch */
+		check_raid_status(mddev,RAID_STATUS_HEALTHY);
+	}
 
 	return ret;
 }

@@ -736,6 +736,8 @@ int __init memory_dev_init(void)
 	mutex_lock(&mem_sysfs_mutex);
 	for (i = 0; i < NR_MEM_SECTIONS; i += sections_per_block) {
 		err = add_memory_block(i);
+		touch_nmi_watchdog();
+		cond_resched();
 		if (!ret)
 			ret = err;
 	}

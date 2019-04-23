@@ -29,7 +29,6 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/extcon.h>
-#include <linux/extcon/of_extcon.h>
 #include <linux/regulator/consumer.h>
 
 #include <linux/usb/otg.h>
@@ -450,11 +449,6 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dev_err(dev, "missing memory base resource\n");
-		return -EINVAL;
-	}
-
 	base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
@@ -548,7 +542,7 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	dwc3_omap_enable_irqs(omap);
 
 	if (of_property_read_bool(node, "extcon")) {
-		edev = of_extcon_get_extcon_dev(dev, 0);
+		edev = extcon_get_edev_by_phandle(dev, 0);
 		if (IS_ERR(edev)) {
 			dev_vdbg(dev, "couldn't get extcon device\n");
 			ret = -EPROBE_DEFER;
@@ -608,9 +602,9 @@ static int dwc3_omap_remove(struct platform_device *pdev)
 	if (omap->extcon_id_dev.edev)
 		extcon_unregister_interest(&omap->extcon_id_dev);
 	dwc3_omap_disable_irqs(omap);
-	device_for_each_child(&pdev->dev, NULL, dwc3_omap_remove_core);
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
+	device_for_each_child(&pdev->dev, NULL, dwc3_omap_remove_core);
 
 	return 0;
 }

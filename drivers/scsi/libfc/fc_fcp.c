@@ -2186,6 +2186,23 @@ int fc_slave_alloc(struct scsi_device *sdev)
 EXPORT_SYMBOL(fc_slave_alloc);
 
 /**
+ * fc_slave_configure - scsi_host_template slave_configure entry point
+ * @sdev: Pointer to scsi_device.
+ *
+ * Return codes:
+ *   0 - Success
+ **/
+int
+fc_slave_configure(struct scsi_device *sdev)
+{
+	/* Thecus /proc/scsi/scsi FCoE Interface = 4 */
+	sdev->disk_if = 4;
+
+	return 0;
+}
+EXPORT_SYMBOL(fc_slave_configure);
+
+/**
  * fc_change_queue_depth() - Change a device's queue depth
  * @sdev:   The SCSI device whose queue depth is to change
  * @qdepth: The new queue depth

@@ -256,6 +256,10 @@ static int slave_configure(struct scsi_device *sdev)
 		if (us->fflags & US_FL_WRITE_CACHE)
 			sdev->wce_default_on = 1;
 
+		/* A few buggy USB-ATA bridges don't understand FUA */
+		if (us->fflags & US_FL_BROKEN_FUA)
+			sdev->broken_fua = 1;
+
 	} else {
 
 		/* Non-disk-type devices don't need to blacklist any pages
@@ -282,6 +286,9 @@ static int slave_configure(struct scsi_device *sdev)
 	 * REMOVAL command, so suppress those commands. */
 	if (us->fflags & US_FL_NOT_LOCKABLE)
 		sdev->lockable = 0;
+
+	/* Thecus /proc/scsi/scsi USB Interface = 2*/
+	sdev->disk_if = 2;
 
 	/* this is to satisfy the compiler, tho I don't think the 
 	 * return code is ever checked anywhere. */

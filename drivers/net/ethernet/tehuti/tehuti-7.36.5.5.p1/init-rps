@@ -1,0 +1,63 @@
+#! /usr/bin/python
+###############################################################################
+#
+# This script scans /boot/grub/grub.conf (CentOs 5.5) for boot configuration,
+# prompts the user for the desired kernel and optionally reboots the system.
+#
+# Usage:
+#
+# Notes:
+#
+################################################################################
+import sys
+import os
+import optparse
+import subprocess
+
+#grep -c processor /proc/cpuinfo
+def get_mask():
+    process = subprocess.Popen(["grep", "-c", "processor", "/proc/cpuinfo"],
+                               shell=False, stdout=subprocess.PIPE)
+
+    cpus = process.communicate()[0]
+    process.wait()
+    return ((1 << int(cpus)) - 1)
+
+def write_file(path, item):
+    f= open(path, "w")
+    f.write(item)
+    f.close()
+    
+# MAIN SCRIPT
+
+parser = optparse.OptionParser(usage = "%prog [options] eth? ...")
+parser.add_option("-m", "", dest = "mask", 
+                  help = "Set mask value (i.e. -m ff)")
+parser.add_option("-t", "", dest="tbl_size",
+                  help = "Set the table size (i.e. -t 256)")
+
+opt, args = parser.parse_args()
+
+if args == []:
+    print "Missing interface name\n"
+    exit
+    
+# INITIALIZE MASK & TBL_SIZE
+
+if opt.mask == None:
+    mask = get_mask()
+else:
+    mask = opt.mask
+
+if opt.tbl_size == None:
+    tbl_size = 256
+else:
+    tbl_size = opt.tbl_size
+
+# FOR EACH NIC INITIALIZE RPS_FLOW_CNT & RPS_CPUS
+
+for nic in args:
+    dir = "/sys/class/net/" + nic + "/queues/rx-0/"
+    write_file(dir + "rps_flow_cnt", str(tbl_size))
+    write_file(dir + "rps_cpus", hex(mask)[2:]
+)

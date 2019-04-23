@@ -1108,6 +1108,9 @@ int fc_slave_alloc(struct scsi_device *);
 int fc_change_queue_depth(struct scsi_device *, int qdepth, int reason);
 int fc_change_queue_type(struct scsi_device *, int tag_type);
 
+/* thecus_event patch/Intf:{SATA/SAS/USB/iSCSI/FCoE/JBOD} */
+int fc_slave_configure(struct scsi_device *sdev); 
+
 /*
  * ELS/CT interface
  *****************************/

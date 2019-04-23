@@ -1,0 +1,659 @@
+#!/bin/bash
+################################################################################
+#
+# sysinfo - A script for gathering Linux system information.
+#
+# Usage: sysinfo [flags] [out file]
+#
+# Notes:
+#      - Use: "sysinfo -h" for help information.
+#      - To check everything use "sysinfo -a"
+#      - Script output is directed to stdout if out file is not specified. 
+#      - Some tests (hardware end NIC reporting) require root privileges. A
+#        non-privileged user may run with limited functionality by specifying
+#        the -U flag.
+#
+# Tehuti Networks(R) Network Driver
+# Copyright (C) 2010 Tehuti Networks Ltd. All rights reserved
+#
+# Author: Arnon Kanfi
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+################################################################################
+################################################################################
+#
+# Variable initialization
+#
+################################################################################
+out_file=/dev/stdout
+version=1.0
+block=no
+cpu=no
+fs=no
+hardware=no
+kernel_params=no
+nic=no
+net_config=no
+processes=no
+net_stat=no
+open_files=no
+sockets=no
+force_regular_user=no
+
+
+################################################################################
+#
+# PRINT_USAGE
+#
+################################################################################
+
+function print_usage {
+
+    cat <<EOF
+$0 [-h] [outfile]
+   -a   Check everything
+   -b   Check block devices and volumes
+   -b   CPU
+   -f   Check filesystems
+   -H   Check hardware
+   -h   Help
+   -k   Check kernel parameters
+   -N   Check network configuration files
+   -n   Check NICs
+   -o   Check open files (lsof)
+   -p   Check processes
+   -S   Check sockets (lsof -i)
+   -s   Check network statistics (netstat)
+   -U   Run as a non-privileged used
+EOF
+    exit
+}
+
+
+################################################################################
+#
+# CHECK_PROGS (message, progs...) Check if progs exist. If any program does
+#                                 not exist print an error message and return
+#                                 no.   
+#
+################################################################################
+
+function check_progs {
+    check_progs_ret=yes
+    local tst=$1
+    shift
+    for i in $*
+    do
+        if type $i >/dev/null 2>/dev/null
+        then
+            false
+        else
+            echo Error: Program $i was not found ignoring test $tst >> $out_file
+            check_progs_ret=no
+        fi
+    done
+    true
+}
+
+
+################################################################################
+#
+# SEP		# Print separator line
+#
+################################################################################
+
+function sep {
+
+    cat >> $out_file <<EOF
+################################################################################
+EOF
+}
+
+
+################################################################################
+#
+# HDR (header)		# Print section header
+#
+################################################################################
+
+function hdr {
+
+    echo "$1" >> $out_file
+    printf -vch  "%${#1}s" ""
+    printf "%s\n" "${ch// /=}" >> $out_file
+    echo  >> $out_file
+}
+
+
+################################################################################
+#
+# PRINT_VAR (var_name, [comment])   Print a single variable followed by an
+#                                   optional comment 
+#
+################################################################################
+
+function print_var {
+
+    eval val=\$$1
+    if [ -n "$2" ]
+    then
+        printf "%-12s %-32s # %s\n" $1: $val "$2" >> $out_file
+    else
+        printf "%-12s %s\n" $1: $val >> $out_file
+    fi
+}
+
+
+################################################################################
+#
+# PRINT_VAR_LIST (var ...)   Print a variable list
+#
+################################################################################
+
+function print_var_list {
+    for i in $*
+    do
+        print_var $i
+    done
+}
+
+
+################################################################################
+#
+# GET_DISTRO	Get Linux distribution
+#
+################################################################################
+
+get_distro()
+{
+    # Check for GNU/Linux distributions
+    if [ -f /etc/redhat-release ]
+    then                                # RedHat
+        if grep -iq 'red.*hat.*enterprise.*linux' \
+            /etc/redhat-release
+        then
+            dist="RHEL"
+        elif grep -iq 'CentOS' /etc/redhat-release
+        then
+            dist="CentOS"
+        else
+            dist="RH"
+        fi
+        release=$(sed -e 's#[^.0-9]##g' /etc/redhat-release)
+    elif [ -f /etc/fedora-release ]
+    then                                # Fedora
+        dist="FED"
+        release=$(sed -e 's#[^.0-9]##g' /etc/fedora-release)
+    elif [ -f /etc/SuSE-release ]
+    then                                # SuSE
+        dist="SuSE"
+        release=$(sed  -e '/SuSE.*/d' -e 's/VERSION[ =]*//' \
+            /etc/SuSE-release)
+    elif [ -f /etc/mandrake-release ]
+    then                                # Mandrake
+        dist="MDK"
+        release=$(sed "s/.*release \([0-9.]*\).*/\1/g" \
+            /etc/mandrake-release)
+    elif [ -f /etc/lsb-release ]
+    then                                # Ubuntu"
+        dist="Ubuntu"
+        release=$(awk -v FS="=" -- '/DISTRIB_RELEASE/ { print $2 }'\
+                              /etc/lsb-release)
+    elif [ -f /etc/UnitedLinux-release ]
+    then                                # UnitedLinux
+        dist="UL"
+        release="?.?"                   # XXX Need to implement
+    elif [ -f /etc/debian_version ]
+    then                                # Debian
+        dist="DEB"
+        release="?.?"                   # XXX Need to implement
+    else                                # Unkonwn
+        dist="unknown"
+        release="?.?"
+    fi
+    echo "$dist:$release"
+}
+
+
+################################################################################
+#
+# GET_INTERFACES    Return interfaces (handles wildcards)
+#
+################################################################################
+
+function get_interfaces {(
+    cd /sys/class/net
+    echo $*
+)}
+
+
+################################################################################
+#
+# SHOW_NIC_INFO (interfaces)    Show NIC info
+#
+################################################################################
+
+function show_nic_info {
+    
+    for xface in $*
+    do
+        printf "%-8s" "$xface"  >> $out_file 
+        # Show driver & version
+
+        if [ `whoami` == root ]
+        then
+            tmp_file=`mktemp`
+            ethtool -i $xface 2>/dev/null | awk \
+                '/driver:/      { print "Driver:           " $2} 
+                 /version:/     { print "        Version:          " $2 ; exit }' \
+                 > $tmp_file
+            [ -s $tmp_file ] || echo > $tmp_file
+            cat $tmp_file  >> $out_file
+            rm $tmp_file
+        
+            # Show ifconfig info
+            ifconfig $xface | awk -v resolve_names=$resolve_names -v ipv6=$ipv6 \
+                '/HWaddr/      {print "        HWaddr:           " $5} 
+                 /inet addr/   { sub("addr:", "", $2)  
+                                 sub("Bcast:", "", $3) 
+                                 sub("Mask:", "", $4)
+                                 printf "        IP addr:          %-12s " \
+                                        "                    ", $2
+                                 cmd="host " $2 "| cut -d \" \" -f 5" ;
+                                 if (resolve_names)
+                                     system(cmd)
+                                 else
+                                     print ""
+                                 print "        Broadcast:        " $3
+                                 print "        Mask:             " $4 }
+                 /inet6 addr/   { if (ipv6)
+                                {
+                                   sub("addr:", "", $2)  
+                                   printf "        IPv6 addr:        %-32s %s",\
+                                          $3, $4
+                                   cmd="host " $3 "| cut -d \" \" -f 5" ;
+                                   # if (resolve_names)
+                                   #     system(cmd)
+                                   # else
+                                       print ""
+                                }}
+                 /MTU/          { s = substr($0, index($0, "MTU:") + 4)
+                                  split(s, a, " ")
+                                  print "        MTU:              " a[1] }' \
+                >> $out_file
+
+             # Show offload features
+            ethtool -k $xface 2>/dev/null | awk \
+                '/rx-checksumming:/      { print "        rx-checksumming:  " $2 } 
+                 /tx-checksumming:/      { print "        tx-checksumming:  " $2 }
+                 /scatter-gather:/       { print "        scatter-gather:   " $2 }
+                 /tcp segmentation/      { print "        tso:              " $4 }
+                 /generic segmentation/  { print "        gso:              " $4 }
+                 /receive-offload:/      { print "        gro:              " $2 }
+                '  >> $out_file 
+           
+            bus_address=`ethtool -i $xface | awk '/bus-info:/      { print $2}'`
+            echo "        Bus address:     " $bus_address   >> $out_file
+            lspci -vs $bus_address | awk \
+                ' NR == 1    {sub(".+: ", "", $0) 
+                              print  "        Device:           " $0 }
+                  NR == 2    {sub(".+: ", "", $0) 
+                              print  "        Subsystem:        " $0 } 
+                '  >> $out_file
+            lspci -vns $bus_address | awk \
+                ' NR == 1    {print  "        Vendor code:      " \
+                              substr($0, length($0) - 8, 4)
+                              print  "        Device code:      " \
+                              substr($0, length($0) - 3)}
+                  NR == 2    {print  "        Subsystem code:   " \
+                              substr($0, length($0) - 3) } 
+               '   >> $out_file
+        
+            # Show long features
+            ethtool $xface | awk \
+                '/Speed:/              { print "        Speed:            " $2 } 
+                 /Duplex:/             { print "        Duplex:           " $2 }
+                 /Auto-negotiation:/   { print "        Auto-negotiation: " $2 }
+                 /Link detected:/      { print "        Link detected:    " $3 }
+                '  >> $out_file    
+            echo  >> $out_file
+        else
+            # Show ifconfig info
+            ifconfig $xface | awk -v resolve_names=$resolve_names -v ipv6=$ipv6 \
+                '/HWaddr/      {print "HWaddr:           " $5} 
+                 /inet addr/   { sub("addr:", "", $2)  
+                                 sub("Bcast:", "", $3) 
+                                 sub("Mask:", "", $4)
+                                 printf "        IP addr:          %-12s " \
+                                        "                    ", $2
+                                 cmd="host " $2 "| cut -d \" \" -f 5" ;
+                                 if (resolve_names)
+                                     system(cmd)
+                                 else
+                                     print ""
+                                 print "        Broadcast:        " $3
+                                 print "        Mask:             " $4 }
+                 /inet6 addr/   { if (ipv6)
+                                {
+                                   sub("addr:", "", $2)  
+                                   printf "        IPv6 addr:        %-32s %s",\
+                                          $3, $4
+                                   cmd="host " $3 "| cut -d \" \" -f 5" ;
+                                   # if (resolve_names)
+                                   #     system(cmd)
+                                   # else
+                                       print ""
+                                }}
+                 /MTU/          { s = substr($0, index($0, "MTU:") + 4)
+                                  split(s, a, " ")
+                                  print "        MTU:              " a[1] }' \
+                >> $out_file
+            echo >> $out_file
+        fi
+    done
+}
+
+
+################################################################################
+#
+# SHOW_NETWORK_CONFIG_FILES     Show network configuration files
+#
+################################################################################
+
+function show_network_config_files {
+    local first_time=1
+    for f in /etc/sysconfig/network-scripts/ifcfg-* \
+             /etc/sysconfig/network/ifcfg-* \
+             /etc/network/interfaces
+    do
+        case $f in
+            *~|*.bak|*.old|*.sav|*.orig)
+                ;;
+            *)
+                if [ -f $f ]
+                then
+                    [ $first_time -ne 1 ] &&
+                    echo -------------------- >> $out_file
+                    first_time=0
+
+                    echo File: $f  >> $out_file
+                    echo  >> $out_file
+                    cat $f  >> $out_file
+                    echo  >> $out_file
+                fi
+                ;;
+        esac
+    done
+}
+
+
+################################################################################
+#
+# MAIN SCRIPT
+#
+################################################################################
+
+# PROCESS COMMAND LINE FLAGS
+
+while getopts  "abcfhHkNnopsSU" opt
+do
+    case $opt in
+        a)
+            block=yes
+            cpu=yes
+            fs=yes
+            hardware=yes
+            kernel_params=yes
+            net_config=yes
+            nic=yes
+            processes=yes
+            net_stat=yes
+            open_files=yes
+            sockets=yes
+            ;;
+
+        b)
+            block=yes
+            ;;
+
+        c)
+            cpu=yes
+            ;;
+
+        f)
+            fs=yes
+            ;;
+
+        H)
+            hardware=yes
+            ;;
+
+        h)
+            print_usage
+            ;;
+
+        k)
+            kernel_params=yes
+            ;;
+
+        N)
+            net_config=yes
+            ;;
+
+        n)
+            nic=yes
+            ;;
+
+        o)
+            open_files=yes
+            ;;
+        
+        p)
+            processes=yes
+            ;;
+        
+        s)
+            net_stat=yes
+            ;;
+        
+        S)
+            sockets=yes
+            ;;
+
+        U)
+            force_regular_user=yes
+            ;;
+    esac
+done
+
+
+# PROCESS THE OPTIONAL COMMAND LINE THREAD AND OTHER ARGUMENTS
+
+shift `expr $OPTIND - 1`
+[ -z "$1" ] || out_file=$1
+> $out_file
+
+# VERIFY THAT REQUIRED PROGRAMS ARE INSTALLED
+
+[ "$hardware" == yes ] && check_progs "hardware" dmidecode &&
+hardware=$check_progs_ret
+[ "$kernel_params" == yes ] && check_progs "kernel_params" sysctl &&
+kernel_params=$check_progs_ret
+[ "$nic" == yes ] && check_progs "nic" ethtool ifconfig awk lspci &&
+nic=$check_progs_ret
+
+[ "$block" == yes ] && check_progs "block" blkid && block=$check_progs_ret
+[ "$fs" == yes ] && check_progs "fs" mount df && fs=$check_progs_ret
+[ "$processes" == yes ] && check_progs "processes" top &&
+[ "$net_stat" == yes ] && check_progs "network" netstat &&
+net_stat=$check_progs_ret
+[ "$open_files" == yes ] && check_progs "open files" lsof &&
+open_files=$check_progs_ret
+[ "$sockets" == yes ] && check_progs "sockets" lsof &&
+sockets=$check_progs_ret
+
+# Am I root?
+
+if [ `whoami` != root ] &&
+   [ "$nic" == yes -o "$hardware" == yes -o "$cpu" == yes ] 
+then
+    if [ "$force_regular_user" == no ]
+    then
+        echo "Error: You must be root to run sysinfo with full functionality" >&2
+        echo "       To run a a non-privileged user with limited functionality use -U" >&2
+        exit
+    else
+        echo Warning: You are running as a non-privileged user with limited functionality >&2
+        hardware=no
+        cpu=no
+    fi
+fi
+
+# PRINT SYSINFO VERSION
+
+echo sysinfo $version  >> $out_file
+sep
+
+# PRINT OS/DISTRO INFORMATION
+hdr "OS Information"
+
+os=`uname -s`
+host=`uname -n`
+kernel=`uname -r`
+machine=`uname -m`
+processor=`uname -p`
+distro="$(get_distro)"
+
+print_var_list os host kernel machine processor distro
+echo  >> $out_file
+sep
+
+# PRINT CPU INFORMATION
+if [ "$cpu" == yes ]
+then
+    hdr "CPU Information"
+    cpuid  >> $out_file
+    echo  >> $out_file
+    sep
+fi
+
+# PRINT hardware INFORMATION
+if [ "$hardware" == yes ]
+then
+    hdr "Hardware Information"
+    dmidecode -q  >> $out_file
+    sep
+fi
+
+# PRINT memory INFORMATION
+hdr "Memory Information"
+
+free -t  >> $out_file
+echo  >> $out_file
+sep
+
+# PRINT Kernel Parameters (sysctl) Information
+if [ "$kernel_params" == yes ]
+then
+    hdr "Kernel Parameters (sysctl) Information"
+    sysctl -A -e  >> $out_file 2> /dev/null
+    echo  >> $out_file
+    sep
+fi
+
+# PRINT NIC information
+if [ "$nic" == yes ]
+then
+    hdr "NIC Information"
+    interfaces=`get_interfaces eth*`
+    show_nic_info $interfaces
+    sep
+fi
+
+# PRINT Netstat information
+if [ "$net_stat" == yes ]
+then
+    hdr "Netstat Information"
+    echo netstat -rn: >> $out_file
+    echo  >> $out_file
+    netstat -rn >> $out_file 2> /dev/null
+    echo  >> $out_file
+    echo netstat -i: >> $out_file
+    echo  >> $out_file
+    netstat -i >> $out_file 2> /dev/null
+    echo  >> $out_file
+    echo netstat -i: >> $out_file
+    echo  >> $out_file
+    netstat -s >> $out_file 2> /dev/null
+    echo  >> $out_file
+    sep
+fi
+
+# PRINT Sockets information
+if [ "$sockets" == yes ]
+then
+    hdr "Sockets Information"
+    lsof -i -n >> $out_file 2> /dev/null
+    echo  >> $out_file
+    sep
+fi
+
+# PRINT NETWORK CONFIG FILES INFORMATION
+if [ "$net_config" == yes ]
+then
+    hdr "Network Config Files Information"
+    show_network_config_files
+    sep
+fi
+
+# Show Block devices
+if [ "$block" == yes ]
+then
+    hdr "Block Devices and Volumes"
+    blkid  >> $out_file
+    echo  >> $out_file
+    sep
+fi
+
+# Show Filesystems
+if [ "$fs" == yes ]
+then
+    hdr "Filesystems"
+
+    echo Fstab: >> $out_file
+    echo  >> $out_file
+    cat /etc/fstab  >> $out_file
+    echo  >> $out_file
+    echo -------------------- >> $out_file
+
+    echo Mounted Filesystems >> $out_file
+    echo  >> $out_file
+    mount  >> $out_file
+    echo  >> $out_file
+    echo -------------------- >> $out_file
+
+    echo Filesystem Space >> $out_file
+    echo  >> $out_file
+    df  >> $out_file
+    echo  >> $out_file
+    sep
+fi
+
+# PRINT Open files information
+if [ "$open_files" == yes ]
+then
+    hdr "Open Files Information"
+    lsof >> $out_file 2> /dev/null
+    echo  >> $out_file
+fi
+
+# Show processes
+if [ "$processes" == yes ]
+then
+    hdr "Processes"
+    top -bn 1 | sed 's/ *$//' >> $out_file
+fi

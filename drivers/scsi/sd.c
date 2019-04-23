@@ -68,6 +68,19 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
+/* Thecus disk index/access led */
+#include <linux/thecus_event.h>
+
+#define LED_OFF         0x0
+#define LED_ON          0x1
+#define LED_BLINK1      0x2
+#define LED_BLINK2      0x3
+#define LED_ENABLE      0x4
+#define LED_DISABLE     0x5
+
+extern u32 thecus_disk_index(int index,struct scsi_device *sdp);
+extern void thecus_disk_access(int index,int act);
+
 MODULE_AUTHOR("Eric Youngdale");
 MODULE_DESCRIPTION("SCSI disk (sd) driver");
 MODULE_LICENSE("GPL");
@@ -2846,9 +2859,11 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 	index = sdkp->index;
 	dev = &sdp->sdev_gendev;
 
+	/* Thecus disk patch
 	gd->major = sd_major((index & 0xf0) >> 4);
 	gd->first_minor = ((index & 0xf) << 4) | (index & 0xfff00);
 	gd->minors = SD_MINORS;
+	*/
 
 	gd->fops = &sd_fops;
 	gd->private_data = &sdkp->driver;
@@ -2889,6 +2904,14 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 		  sdp->removable ? "removable " : "");
 	scsi_autopm_put_device(sdp);
 	put_device(&sdkp->dev);
+	/* Thecus Event : DISK_ADD */
+	{
+		char strevent[20];
+		sprintf(strevent,"%s %d",sdp->dev_name,sdp->tray_id);
+		printk("DISK_ADD %s %d\n",sdp->dev_name,sdp->tray_id);
+		criticalevent_user(DISK_ADD,strevent);
+		thecus_disk_access(sdp->tray_id,LED_ENABLE);
+	}
 }
 
 /**
@@ -2916,6 +2939,7 @@ static int sd_probe(struct device *dev)
 	struct gendisk *gd;
 	int index;
 	int error;
+	u32 tindex;
 
 	error = -ENODEV;
 	if (sdp->type != TYPE_DISK && sdp->type != TYPE_MOD && sdp->type != TYPE_RBC)
@@ -2947,9 +2971,21 @@ static int sd_probe(struct device *dev)
 		goto out_put;
 	}
 
-	error = sd_format_disk_name("sd", index, gd->disk_name, DISK_NAME_LEN);
+	tindex = thecus_disk_index(index,sdp);
+	error = sd_format_disk_name("sd", tindex, gd->disk_name, DISK_NAME_LEN);
 	if (error) {
 		sdev_printk(KERN_WARNING, sdp, "SCSI disk (sd) name length exceeded.\n");
+		goto out_free_index;
+	}
+
+	/* Thecus disk index */
+	if (tindex < SD_MAX_DISKS) {
+		gd->major = sd_major((tindex & 0xf0) >> 4);
+		gd->first_minor = ((tindex & 0xf) << 4) | (tindex & 0xfff00);
+		gd->minors = SD_MINORS;
+	} else {
+		error = -ENODEV;
+		sdev_printk(KERN_WARNING, sdp, "SCSI disk (sd) index exceeded(SD_MAX_DISKS).\n");
 		goto out_free_index;
 	}
 
@@ -2959,6 +2995,11 @@ static int sd_probe(struct device *dev)
 	sdkp->index = index;
 	atomic_set(&sdkp->openers, 0);
 	atomic_set(&sdkp->device->ioerr_cnt, 0);
+
+	/* Thecus disk index */
+	strcpy(sdp->dev_name, gd->disk_name);
+	sdp->tray_id = tindex + 1;
+	printk("Thecus Tray: %d, %s\n", sdp->tray_id, gd->disk_name);
 
 	if (!sdp->request_queue->rq_timeout) {
 		if (sdp->type != TYPE_MOD)
@@ -3022,6 +3063,15 @@ static int sd_remove(struct device *dev)
 	device_del(&sdkp->dev);
 	del_gendisk(sdkp->disk);
 	sd_shutdown(dev);
+
+	/* Thecus Event : DISK_REMOVE */
+	{
+		char strevent[20];
+		/*printk("DISK_REMOVE %s %d",sdkp->device->dev_name,sdkp->device->tray_id);*/
+		sprintf(strevent,"%s %d",sdkp->device->dev_name,sdkp->device->tray_id);
+		criticalevent_user(DISK_REMOVE,strevent);
+		thecus_disk_access(sdkp->device->tray_id,LED_DISABLE);
+	}
 
 	blk_register_region(devt, SD_MINORS, NULL,
 			    sd_default_probe, NULL, NULL);
