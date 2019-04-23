@@ -54,7 +54,7 @@ static int board_idx = 0;
 static struct thecus_board board_info [] = {
 	{ 0, "N2800"    , 2, 17, 1, "700", "BOARD_N2800", &n2800_func},
 	{ 1, "N4800"    , 4, 17, 1, "701", "BOARD_N2800", &n2800_func},
-	{ 2, "N5550"    , 5, 17, 1, "702", "BOARD_N5550", &n5550_func},
+	{ 2, "N5550"    , 5, 17, 4, "702", "BOARD_N5550", &n5550_func},
 	{ 3, "N8510U"   , 8, 17, 1, "703", "BOARD_N7550", &n7550_func},
 	{ 4, "N4510U-R" , 4, 17, 1, "704", "BOARD_N5550", &n5550_func},
 	{ 5, "N4510U-S" , 4, 17, 1, "705", "BOARD_N5550", &n5550_func},
@@ -195,8 +195,20 @@ u32 n5550_disk_index(int index, struct scsi_device *sdp){
     } else if(0==strncmp(sdp->host->hostt->name,"sata_sil24",strlen("sata_sil24"))){
         tindex = sdp->host->host_no;
         switch (tindex) {
-            case 6: // disk 6
-                tindex = tindex + 10; //eSATA
+            case 6: // disk 6 w/ channel 0 - 9 = 16 - 25 = sdq - sdz
+                if (sdp->channel <= 9)
+                    tindex = tindex + 10 + sdp->channel; //eSATA
+                else {
+                    WARN(sdp->channel > 9,
+                         "sata_sil24 w/ host_no:%d channel:%d > 9, using %d\n",
+                         tindex, sdp->channel, index);
+                    tindex = index;
+                }
+                break;
+            default:
+                WARN(1, "sata_sil24 w/ host_no:%d, using %d\n", tindex,
+                     tindex - 1);
+                tindex = tindex - 1;
                 break;
        }
     }else if(0==strncmp(sdp->host->hostt->name,"uas",strlen("uas"))){
