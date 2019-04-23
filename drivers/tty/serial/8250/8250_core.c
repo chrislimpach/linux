@@ -1876,7 +1876,8 @@ static void wait_for_xmitr(struct uart_8250_port *up, int bits)
 				break;
 			udelay(1);
 			touch_nmi_watchdog();
-			cond_resched();
+                        if (!irqs_disabled())
+                            cond_resched();
 		}
 	}
 }
@@ -2876,7 +2877,8 @@ serial8250_console_write(struct console *co, const char *s, unsigned int count)
 	int locked = 1;
 
 	touch_nmi_watchdog();
-	cond_resched();
+        if (!irqs_disabled())
+            cond_resched();
 
 	local_irq_save(flags);
 	if (port->sysrq) {
