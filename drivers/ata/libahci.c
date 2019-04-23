@@ -1541,24 +1541,31 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 static struct ata_queued_cmd *ahci_qc_new(struct ata_port *ap)
 {
 	struct ata_queued_cmd *qc = NULL;
-	unsigned int i;
+	unsigned int max_queue = ap->host->n_tags;
+	unsigned int i, tag;
 
 	/* no command while frozen */
 	if (unlikely(ap->pflags & ATA_PFLAG_FROZEN))
 		return NULL;
 
-	/* the last tag is reserved for internal command. */
-	for (i = 0; i < ATA_MAX_QUEUE - 1; i++)
-		if (!test_and_set_bit(i, &ap->qc_allocated)) {
-			qc = __ata_qc_from_tag(ap, i);
+	for (i = 0, tag = ap->last_tag + 1; i < max_queue; i++, tag++) {
+		tag = tag < max_queue ? tag : 0;
+
+		/* the last tag is reserved for internal command. */
+		if (tag == ATA_TAG_INTERNAL)
+			continue;
+
+		if (!test_and_set_bit(tag, &ap->qc_allocated)) {
+			qc = __ata_qc_from_tag(ap, tag);
+			qc->tag = tag;
+			ap->last_tag = tag;
 			break;
 		}
+	}
 
 	/* disk light off */
 	thecus_disk_access(ap->scsi_host->host_no,LED_OFF);
 
-	if (qc)
-		qc->tag = i;
 	return qc;
 }
 
@@ -1575,10 +1582,11 @@ static struct ata_queued_cmd *ahci_qc_new(struct ata_port *ap)
 
 void ahci_qc_free(struct ata_queued_cmd *qc)
 {
-	struct ata_port *ap = qc->ap;
+        struct ata_port *ap;
 	unsigned int tag;
 
-	WARN_ON(qc == NULL);	/* ata_qc_from_tag _might_ return NULL */
+	WARN_ON_ONCE(qc == NULL); /* ata_qc_from_tag _might_ return NULL */
+        ap = qc->ap;
 
 	qc->flags = 0;
 	tag = qc->tag;
