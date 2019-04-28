@@ -1,0 +1,236 @@
+                   Tehuti Networks 10GbE Adapter Driver
+                   
+TOC
+1. Supported HW
+2. Supported OS
+3. Features
+4. Configuration
+5. Installation
+
+
+1. Supported Hardware
+        1. x86
+       	2. x86_64 
+
+2. Supported Operating Systems
+   The Linux driver supports the following Linux kernels:
+      2.6.24-3.2.12
+
+   This release was tested on the following distributions:
+       Centos 5.6 (kernel 2.6.18-238.12.1.el5)
+       Ubuntu 11.04 (Kernel 2.6.38-10)
+       Ubuntu 11.10 (Kernel 3.0.0-12)
+       Ubuntu 11.10 (Kernel 3.1.1)
+       Ubuntu 11.10 (Kernel 3.2.12)
+       Fedora 15  (Kernel  2.6.38.8-35)
+       OpenSUSE 11.4 (Kernel 2.6.37.6-0.5)
+
+3. Features
+   Along with providing the required/mandatory functionality, the driver also
+   implements the following bonus features:
+
+        1. TSO - TCP Segmentation Offload - driver is capable to accept TCP
+           packets much larger than the MTU (e.g.: 1500), say 64K packets, and
+           fragment them in the NIC HW into TCP packets smaller then MTU. The
+           TCP  header of the original packet serves as a template for the
+           TCP headers of smaller packets.
+
+        2. HW Checksum Offload - move the IP, UDP, TCP checksum computation
+           from the host CPU to the NIC.
+
+        3. Scatter/Gather IO - driver can send a packet consisting of
+           several distinct memory segments. The driver also does HW 
+           checksumming on each segment.
+
+        4. High DMA - the NIC can access the entire 64bit address space,
+           including memory above 1 GB, aka high memory.
+
+        5. NAPI - Polling vs Interrupt-Driven. This API implements switching 
+           between polling and interrupt-driven workflow. When the driver
+           sees that there are always more packets to proceed it disables
+           the HW interrupts and switches to polling mode. When the OS finds
+           time, it calls the driver's poll routine to accept the new
+           packets. No expensive ISR cost is ever paid. When the incoming
+           packet rate drops, the driver switches back to interrupt-driven
+           flow. 
+
+        6. ethtool - extra diagnostics and statistics. Used by the ethtool
+           program.
+
+        7. HW multicast filtering of incoming traffic.
+
+        8. HW VLAN filtering of incoming traffic.
+
+4. Installation
+
+   o To build the driver run
+     make
+
+   o To install the driver to /lib/modules/$KERNEL_VER/kernel/drivers/net
+     do one of the following:
+     o Run: 
+       	 make install
+         depmod `uname -r`
+     o Or run:
+         make driver
+       Running make driver is equivalent to the above operations.
+
+     o Or run:
+         tinstall
+       tinstall Will copy the driver from the current directory to
+       /lib/modules/$KERNEL_VER/kernel/drivers/net and will then run
+       depmod `uname -r` 
+
+    o To install a precompiled driver copy the driver (tehuti.ko) and the
+      tinstall to a flash drive/cd/dvd/network accessible directory. Both
+      files need to be in the same folder. On the target machine dor the
+      following:
+      o Login as root.
+      o cd to the distribution directory
+      o Run: sh tinstall
+
+5. Configuration
+
+ o The driver itself does not require any user configuration and will
+   automatically adjust to its working environment
+
+ o The kernel can be instructed to use more memory (buffers, caches, socket
+   data) to prevent memory from becoming a bottleneck.
+
+   Run "sysctl -p sysctl_luxor.conf" to set the relevant parameters.
+
+ o Linux 2.6.35 and above supports a feature called RPS (Receive Packet
+   Steering). This feature allows spreading received packets to specified
+   processors. In order to use this packet each interface has two
+   configuration variables. These variables are located in:
+     /sys/class/net/eth?/queues/rx-0/rps_cpus
+     /sys/class/net/eth?/queues/rx-0/rps_flow_cnt
+     
+   The rps_cpus is a bitmap that specifies, which cpus will handle received
+   packets, every processor has bit in the bitmap (i.e. "echo 0e > rps_cpus"
+   will enable processors 1,2 and 3). The rps_flow_cnt contains the size of
+   the hash table (i.e. set it to 256) that is used for associating a CPU
+   with a packet. To use RPS both values need to be initialized. This can be
+   done automatically by a script after booting.
+   The init_rps script may be used to setup these variables.
+   Usage: init_rps [options] eth? ...
+   
+          -m <hex mask>		# Default: all cpus
+	  -t <hash table size>	# Default 256
+
+   Example: init_rps eth1 eth2
+   
+   The mask and the hash table size are automatically calculated unless
+   specified explicitly by the user. init_rps requires python.
+
+o On Linux 2.6.35 and above the driver include on parameter, which is only
+  used for testing purposes. The variable is located in:
+      /sys/module/tehuti/parameters/paged_buffers
+      
+  It defaults to 1, by setting it to zero we disable paged buffers, which
+  will slow down the driver.
+
+  
+6. Usage
+
+o The driver should load automatically when needed. To load the driver
+  manually (not really needed), do one of the following:
+    o Run: insmod tehuti
+    o Or run: insmod /lib/modules/`uname -r`/kernel/drivers/net/tehuti.ko
+
+o To verify the the driver is loaded run: lsmod|grep -i tehuti
+   
+o To manually unload the driver run: rmmod tehuti
+   
+o Now you can run dmesg and ifconfig -a to see which interface was added
+  and  configure an IP address on it. For example:
+       ifconfig eth1 10.0.0.1/24
+
+o Permanently configuring network interfaces. This procedure involves
+  setting up configuration files and is specific to the actual Linux
+  distro. Below are notes for various popular Linux distributions:
+
+    o RHEL and family (CentOs, Fedora):
+      Network configuration files are located in the
+      /etc/sysconfig/network-scripts directory. Each interface has a
+      configuration file that is named after the interface name
+      (i.e. /etc/sysconfig/network-scripts/ifcfg-eth0). The file may be used
+      to setup the IP using dhcp or manually. Examples:
+
+        o Static IP:
+          DEVICE=eth5
+          BOOTPROTO=static             # Static ip
+          ONBOOT=yes
+          HWADDR=00:30:4F:76:AB:09
+          BROADCAST=192.168.5.255
+          IPADDR=192.168.5.1
+          NETMASK=255.255.255.0
+          NETWORK=192.168.5.0
+
+	o Dynamic IP using dhcp:
+	  DEVICE=eth0
+          HWADDR=00:04:23:C7:33:EF
+          BOOTPROTO=dhcp
+          ONBOOT=yes
+
+    o Open Suse:
+      Network configuration files are located in the
+      /etc/sysconfig/network. Each interface has a configuration file that
+      is named after the interface name
+      (i.e. /etc/sysconfig/network/ifcfg-eth0). The file may be used 
+      to setup the ip using dhcp or manually. The syntax is differs slightly
+      from RHEL. Examples:
+    
+        o Static IP:
+       	  STARTMODE=auto           # {manual*|auto|hotplug|ifplugd|
+                    		   #  nfsroot|off}
+                    		   # hotplug is similar to auto but
+                    		   # rcnetwork will not fail if it
+                    		   # cannot configure the interface.
+       	  LLADDR=00:30:4F:76:AB:09
+       	  BOOTPROTO=static         # {static*|dhcp|autoip|dhcp+autoip|6to4}
+          NETMASK=255.255.255.0
+          BROADCAST=192.168.5.255
+          NETWORK=192.168.5.0
+          IPADDR=192.168.5.1
+	  # IPADDR=192.168.5.1/24  # This is shorthand for the above.
+       	  MTU=1500
+
+	o Dynamic IP using dhcp:
+       	  STARTMODE=auto
+          HWADDR=00:04:23:C7:33:EF
+          BOOTPROTO=dhcp
+	  
+    o Ubuntu and family (Debian, Ubuntu, Kubuntu, etc.)
+      Network configuration files are located in a single file
+      /etc/network/interfaces.
+
+      Examples:
+       auto  lo
+       iface lo inet loopback
+
+       auto  eth0
+       iface eth0 inet static
+             address	192.168.5.1
+	     hwaddress  ether 00:30:4f:76:ab:09
+             netmask	255.255.255.0
+             broadcast 	192.168.5.255
+             network 	192.168.5.0
+
+o Configuration files setup notes:
+
+  o These configuration files will setup the interface and the routing
+    tables. No additional scripting or setting of other configuration files
+    is needed in most cases. One exception may be enabling RPS, which may
+    require some additional scripting.
+    
+  o Make sure that the driver is installed properly (including running
+    depmod) before attempting to set and use the configuration files.
+    
+  o Hardware detection programs have the bad habit of messing with these
+    files so keep a backup somewhere in case they are removed or modified.
+
+  o You may need to reboot after setting up these files in order for the
+    changes to take place.
+
+

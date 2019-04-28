@@ -1,0 +1,49 @@
+
+Initial version 1.1.6.6 11/6/13
+===============================
+
+- DEV-ID : 4022, SubDEV-ID: 3015   Interface SFP+
+
+- Kernel versions supported: 2.6.24-3.8
+
+Version 1.1.6.7 3/7/13
+======================
+
+- Load MAC FW at initialization time (insmod)
+- Reduced module memory footprint by freeing PHY and MAC FW memory file after initialization phase.
+
+Version 1.1.6.7 16/7/13
+======================
+
+- Added suspend/resume support to make install
+
+Version 1.1.6.7 17/7/13
+======================
+
+- Fixed MODPOST warnings.
+- Added retry to QT2025 sfp+ link change.
+
+Version 1.1.6.7 24/7/13
+======================
+
+- Added retry to CX4 link change.
+
+Version 1.1.6.7 29/7/13
+======================
+
+- Support RHEL >= 6.3 
+
+Version 1.1.6.7 4/8/13
+======================
+
+- Support MAC flow control
+
+Version 1.1.6.8 12/8/13
+======================
+
+- Fixed MTU bug
+
+Version 1.1.6.8 29/9/13
+======================
+
+- D-link special QT2025_phy_D.h FW file

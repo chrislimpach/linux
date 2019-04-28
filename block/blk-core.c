@@ -40,6 +40,8 @@
 #include "blk-cgroup.h"
 #include "blk-mq.h"
 
+#include <linux/thecus_event.h>
+
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_complete);
@@ -2398,7 +2400,11 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 				   error_type, req->rq_disk ?
 				   req->rq_disk->disk_name : "?",
 				   (unsigned long long)blk_rq_pos(req));
-
+		/* Thecus patch for DISK IO FAIL Event */
+		if (req->rq_disk) {
+			printk("DISK_IO_FAIL %s\n",req->rq_disk->disk_name);
+			criticalevent_user(DISK_IO_FAIL,req->rq_disk->disk_name);
+		}
 	}
 
 	blk_account_io_completion(req, nr_bytes);

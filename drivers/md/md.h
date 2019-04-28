@@ -366,6 +366,8 @@ struct mddev {
 	int				degraded;	/* whether md should consider
 							 * adding a spare
 							 */
+	int				raid_status;	/* MAPPING to thecus_event.h "RAID_STATUS_XXXXXX" */
+
 	int				merge_check_needed; /* at least one
 							     * member device
 							     * has a
@@ -627,4 +629,7 @@ static inline int mddev_check_plugged(struct mddev *mddev)
 	return !!blk_check_plugged(md_unplug, mddev,
 				   sizeof(struct blk_plug_cb));
 }
+
+extern void check_raid_status(struct mddev *mddev,int status);
+
 #endif /* _MD_MD_H */

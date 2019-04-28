@@ -936,6 +936,10 @@ static int iscsi_sw_tcp_slave_configure(struct scsi_device *sdev)
 {
 	blk_queue_bounce_limit(sdev->request_queue, BLK_BOUNCE_ANY);
 	blk_queue_dma_alignment(sdev->request_queue, 0);
+
+	/* Thecus /proc/scsi/scsi iSCSI Interface = 3 */
+	sdev->disk_if = 3;
+
 	return 0;
 }
 

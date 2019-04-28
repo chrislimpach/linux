@@ -352,6 +352,8 @@ static int cmos_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 	/* next rtc irq must not be from previous alarm setting */
 	cmos_irq_disable(cmos, RTC_AIE);
 
+	CMOS_WRITE((mday & ~(RTC_ALARM_DONT_CARE)), RTC_REG_D);
+
 	/* update alarm */
 	CMOS_WRITE(hrs, RTC_HOURS_ALARM);
 	CMOS_WRITE(min, RTC_MINUTES_ALARM);
@@ -647,6 +649,7 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 	int				retval = 0;
 	unsigned char			rtc_control;
 	unsigned			address_space;
+	unsigned char   rtc_ctr;
 
 	/* there can be only one ... */
 	if (cmos_rtc.dev)
@@ -699,6 +702,7 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 	 * expect CMOS_READ and friends to handle.
 	 */
 	if (info) {
+		info->rtc_day_alarm = 0x0D; /* rtc schedule fix for thecus used */
 		if (info->rtc_day_alarm && info->rtc_day_alarm < 128)
 			cmos_rtc.day_alrm = info->rtc_day_alarm;
 		if (info->rtc_mon_alarm && info->rtc_mon_alarm < 128)
@@ -792,6 +796,12 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 		cmos_rtc.century ? ", y3k" : "",
 		nvram.size,
 		is_hpet_enabled() ? ", hpet irqs" : "");
+
+        rtc_ctr = CMOS_READ(RTC_CONTROL);
+
+        rtc_ctr &= ~RTC_PIE;
+        CMOS_WRITE(rtc_ctr, RTC_CONTROL);
+        rtc_ctr = CMOS_READ(RTC_CONTROL);
 
 	return 0;
 

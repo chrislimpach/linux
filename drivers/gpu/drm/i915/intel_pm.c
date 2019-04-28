@@ -3120,8 +3120,13 @@ static void gen6_disable_rps(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
+	/*
+	 *  Thecus patch with N7710 i915 issue.
+	 *  This would cause nas reset
+	 *
 	I915_WRITE(GEN6_RC_CONTROL, 0);
 	I915_WRITE(GEN6_RPNSWREQ, 1 << 31);
+	*/
 
 	gen6_disable_rps_interrupts(dev);
 }

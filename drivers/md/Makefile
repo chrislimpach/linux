@@ -22,6 +22,9 @@ raid456-y	+= raid5.o
 # themselves, and md.o may use the personalities when it 
 # auto-initialised.
 
+#Thecus md Event patch
+obj-$(CONFIG_EVENT_THECUS)	+= thecus_event.o
+
 obj-$(CONFIG_MD_LINEAR)		+= linear.o
 obj-$(CONFIG_MD_RAID0)		+= raid0.o
 obj-$(CONFIG_MD_RAID1)		+= raid1.o

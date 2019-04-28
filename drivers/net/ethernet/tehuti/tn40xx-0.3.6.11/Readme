@@ -1,0 +1,26 @@
+
+Driver compilation and installation.
+===================================
+
+To get the make options type make help.
+
+e.g.:
+ make help
+
+tn40xx driver Makefile. Available targets:
+  all              - build the driver
+  clean            - Clean the driver
+  help             - Print this help message
+  install          - Install driver to system directory
+                     usually, it is /lib/modules/VER/kernel/drivers/net
+  default          - all
+
+
+Notes:
+       - make install should be run by a privileged user after running make.
+        e.g.:
+            sudo make install
+
+      - Supported kernels: 2.6.24 - 3.14.x
+
+      - in SLES11, set 'allow_unsupported_modules 1'  in /etc/modprobe.d/unsupported-modules. 

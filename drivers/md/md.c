@@ -54,6 +54,8 @@
 #include "md.h"
 #include "bitmap.h"
 
+#include <linux/thecus_event.h>
+
 #ifndef MODULE
 static void autostart_arrays(int part);
 #endif
@@ -182,6 +184,101 @@ struct bio *bio_clone_mddev(struct bio *bio, gfp_t gfp_mask,
 	return bio_clone_bioset(bio, gfp_mask, mddev->bio_set);
 }
 EXPORT_SYMBOL_GPL(bio_clone_mddev);
+
+/* Thecus md Event patch */
+static struct md_rdev * find_rdev_nr(struct mddev *mddev, int nr);
+static struct md_rdev * find_rdev_role(struct mddev *mddev, int nr);
+/*
+ * Return value
+ * 0:Normal
+ * 1:Degrade
+ * 2:Damage
+ */
+static int chk_degrade(struct mddev * mddev)
+{
+	int nr,working,active,failed,spare;
+	struct md_rdev *rdev;
+	int remove;
+	int i;
+	int ret;
+
+	/*for raid 10 check*/
+	int damage_chk=0x0;
+	int bitkey=0x1;
+	int chkkey=0x3;
+	int targetkey=0;
+
+	nr=working=active=failed=spare=0;
+	list_for_each_entry(rdev, &mddev->disks, same_set) {
+		nr++;
+		if (test_bit(Faulty, &rdev->flags))
+			failed++;
+		else {
+			working++;
+			if (test_bit(In_sync, &rdev->flags))
+				active++;	
+			else
+				spare++;
+		}
+	}
+
+	remove=0;
+	for (i=0;i<mddev->raid_disks;i++) {
+		/* check degrade function should use disk_role field instead of disk_number */
+		rdev = find_rdev_role(mddev, i);
+		if (!rdev) {
+			remove++;
+		} else {
+			damage_chk|=(bitkey<<rdev->raid_disk);
+		}
+	}
+
+	color_print_green_begin();
+	printk(KERN_ALERT "mddev->recovery:%ld, mddev->curr_resync:%ld,  mddev->recovery_cp: %ld\n",mddev->recovery,mddev->curr_resync, mddev->recovery_cp);
+	printk(KERN_ALERT "nr=%d mddev->raid_disks=%d working=%d active=%d spare=%d failed=%d mddev->in_sync=%d remove=%d mdname=%s degrade=%d\n",nr,mddev->raid_disks,working,active,spare,failed,mddev->in_sync,remove,mdname(mddev),mddev->degraded);
+	color_print_end();
+	
+	if ((mddev->raid_disks > working)||(failed>0)||(remove>0)) {
+		ret=1;
+		if(mddev->raid_disks == active){
+			return 0;		
+		}
+		/*Damage Check*/
+		switch (mddev->level) {
+			case -1:
+				ret=2;
+			  break;
+			case 0:
+				ret=2;
+			  break;
+			case 1:
+				if (working<=0) ret=2;
+			  break;
+			case 5:
+				if ((working <2)||(mddev->raid_disks - working >=2)) ret=2;
+			  break;
+			case 6:
+				if ((working <2)||(mddev->raid_disks - working >=3)) ret=2;
+			  break;
+			case 10:
+				chkkey=0x3;
+				for (i=0;i< mddev->raid_disks;i+=2) {
+					targetkey=0;
+					targetkey=damage_chk&(chkkey<<i);
+					/*printk("chkkey=0x%X chkkey<<i=0x%X damage_chk=0x%X targetkey=0x%X \n",chkkey,chkkey<<i,damage_chk,targetkey);*/
+					if (targetkey==0) { /*damage*/
+						/*printk("Damage Happen !!\n");*/
+						ret=2;
+						break;
+					}
+				}
+			  break;
+		}
+		return ret;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(chk_degrade);
 
 /*
  * We have a system wide 'event count' that is incremented
@@ -639,6 +736,18 @@ static struct md_rdev * find_rdev_nr(struct mddev *mddev, int nr)
 			return rdev;
 
 	return NULL;
+}
+
+/* check degrade function should use disk_role field instead of disk_number */
+static struct md_rdev * find_rdev_role(struct mddev *mddev, int role)
+{
+	struct md_rdev *rdev;
+
+	rdev_for_each(rdev, mddev)
+               if (rdev->raid_disk == role)
+                       return rdev;
+
+       return NULL;
 }
 
 static struct md_rdev *find_rdev_nr_rcu(struct mddev *mddev, int nr)
@@ -4852,6 +4961,13 @@ static int md_alloc(dev_t dev, char *name)
 		sprintf(disk->disk_name, "md_d%d", unit);
 	else
 		sprintf(disk->disk_name, "md%d", unit);
+
+	if (( thecus_ha_enable == 1 ) && ( unit == 0 )){
+		blk_queue_logical_block_size(mddev->queue, 4096);
+		blk_queue_physical_block_size(mddev->queue, 4096);
+		printk(KERN_INFO "Thecus force %s logical/physical block size to 4096 !\n", disk->disk_name);
+	}
+
 	disk->fops = &md_fops;
 	disk->private_data = mddev;
 	disk->queue = mddev->queue;
@@ -5090,6 +5206,9 @@ int md_run(struct mddev *mddev)
 		}
 	}
 	if (err) {
+		/* Thecus md Event patch */
+		check_raid_status(mddev,RAID_STATUS_NA);
+
 		module_put(mddev->pers->owner);
 		mddev->pers = NULL;
 		bitmap_destroy(mddev);
@@ -5124,6 +5243,17 @@ int md_run(struct mddev *mddev)
 	
 	if (mddev->flags & MD_UPDATE_SB_FLAGS)
 		md_update_sb(mddev, 0);
+
+	/* Thecus md Event patch */
+	if(mddev->recovery_cp == MaxSector) {
+		int t_status = chk_degrade(mddev);
+		if (t_status == 1) {
+			/* assemble RAID degrade */
+			check_raid_status(mddev,RAID_STATUS_DEGRADE);
+		} else if(t_status == 0) {
+			check_raid_status(mddev,RAID_STATUS_HEALTHY);
+		}
+	}
 
 	md_new_event(mddev);
 	sysfs_notify_dirent_safe(mddev->sysfs_state);
@@ -5423,6 +5553,8 @@ static int do_md_stop(struct mddev * mddev, int mode,
 
 		if (mddev->ro)
 			mddev->ro = 0;
+		/* Thecus md Event patch */
+		check_raid_status(mddev,RAID_STATUS_NA);
 	} else
 		mutex_unlock(&mddev->open_mutex);
 	/*
@@ -5468,6 +5600,9 @@ static void autorun_array(struct mddev *mddev)
 		printk("<%s>", bdevname(rdev->bdev,b));
 	}
 	printk("\n");
+
+	/* Thecus md Event patch */
+	check_raid_status(mddev,RAID_STATUS_AUTO_RUN);
 
 	err = do_md_run(mddev);
 	if (err) {
@@ -5899,12 +6034,38 @@ static int hot_remove_disk(struct mddev * mddev, dev_t dev)
 
 	kick_rdev_from_array(rdev);
 	md_update_sb(mddev, 1);
+
+	/* Thecus md Event patch */
+	if (chk_degrade(mddev)==1) {
+		check_raid_status(mddev,RAID_STATUS_DEGRADE);
+	} else if (chk_degrade(mddev)==2) {
+		check_raid_status(mddev,RAID_STATUS_DAMAGE);
+	} else {
+		check_raid_status(mddev,RAID_STATUS_HEALTHY);
+	}
+
 	md_new_event(mddev);
 
 	return 0;
 busy:
 	printk(KERN_WARNING "md: cannot remove active disk %s from %s ...\n",
 		bdevname(rdev->bdev,b), mdname(mddev));
+
+	/* Thecus md Event patch */
+	printk("md-hot_remove_disk: level=%d max_disk=%d raid_disk=%d \n",
+		mddev->level,mddev->max_disks,mddev->raid_disks);
+	switch (mddev->level) {
+		case -1:
+			check_raid_status(mddev,RAID_STATUS_DAMAGE);
+			break;
+		case 0:
+			check_raid_status(mddev,RAID_STATUS_DAMAGE);
+			break;
+		case 1:
+			check_raid_status(mddev,RAID_STATUS_DAMAGE);
+			break;
+	}
+
 	return -EBUSY;
 }
 
@@ -6653,6 +6814,9 @@ static int md_ioctl(struct block_device *bdev, fmode_t mode,
 		goto done_unlock;
 
 	case RUN_ARRAY:
+		/* Thecus md Event patch */
+		check_raid_status(mddev,RAID_STATUS_CREATE);
+
 		err = do_md_run(mddev);
 		goto done_unlock;
 
@@ -7532,6 +7696,9 @@ void md_do_sync(struct md_thread *thread)
 	       "(but not more than %d KB/sec) for %s.\n",
 	       speed_max(mddev), desc);
 
+	/* Thecus md Event patch */
+	check_raid_status(mddev,RAID_STATUS_RECOVERY);
+
 	is_mddev_idle(mddev, 1); /* this initializes IO event counters */
 
 	io_sectors = 0;
@@ -7955,8 +8122,12 @@ void md_check_recovery(struct mddev *mddev)
 				clear_bit(MD_RECOVERY_RESHAPE, &mddev->recovery);
 				clear_bit(MD_RECOVERY_REQUESTED, &mddev->recovery);
 				clear_bit(MD_RECOVERY_CHECK, &mddev->recovery);
-			} else
+			} else {
+				/* Thecus md Event patch */
+				check_raid_status(mddev,RAID_STATUS_RECOVERY);
+
 				md_wakeup_thread(mddev->sync_thread);
+			}
 			sysfs_notify_dirent_safe(mddev->sysfs_action);
 			md_new_event(mddev);
 		}
@@ -8012,6 +8183,16 @@ void md_reap_sync_thread(struct mddev *mddev)
 	set_bit(MD_RECOVERY_NEEDED, &mddev->recovery);
 	sysfs_notify_dirent_safe(mddev->sysfs_action);
 	md_new_event(mddev);
+
+	/* Thecus md Event patch */
+	if (chk_degrade(mddev)==1) {
+		check_raid_status(mddev,RAID_STATUS_DEGRADE);
+	} else if (chk_degrade(mddev)==2) {
+		check_raid_status(mddev,RAID_STATUS_DAMAGE);
+	} else {
+		check_raid_status(mddev,RAID_STATUS_HEALTHY);
+	}
+
 	if (mddev->event_work.func)
 		queue_work(md_misc_wq, &mddev->event_work);
 }

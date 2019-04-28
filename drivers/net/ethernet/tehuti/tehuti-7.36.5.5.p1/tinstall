@@ -1,0 +1,10 @@
+#!/bin/sh
+
+if [ `whoami` != 'root' ]
+then
+	echo You must be root to run $0, exiting
+	exit 1
+fi
+install --mode=644 --owner=root --group=root tehuti.ko \
+        /lib/modules/`uname -r`/kernel/drivers/net
+depmod `uname -r`

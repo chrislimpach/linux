@@ -286,7 +286,8 @@ static long rtc_dev_ioctl(struct file *file,
 
 		alarm.enabled = 0;
 		alarm.pending = 0;
-		alarm.time.tm_wday = -1;
+		/* rtc schedule fix for thecus used */
+		/* alarm.time.tm_wday = -1; */
 		alarm.time.tm_yday = -1;
 		alarm.time.tm_isdst = -1;
 
@@ -303,6 +304,7 @@ static long rtc_dev_ioctl(struct file *file,
 		 * wildcards, exposing hardware "periodic alarm" capabilities.
 		 * Not supported here.
 		 */
+#if 0
 		{
 			unsigned long now, then;
 
@@ -327,7 +329,7 @@ static long rtc_dev_ioctl(struct file *file,
 				alarm.time.tm_year = tm.tm_year;
 			}
 		}
-
+#endif 
 		return rtc_set_alarm(rtc, &alarm);
 
 	case RTC_RD_TIME:

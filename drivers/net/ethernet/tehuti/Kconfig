@@ -18,10 +18,22 @@ config NET_VENDOR_TEHUTI
 
 if NET_VENDOR_TEHUTI
 
-config TEHUTI
-	tristate "Tehuti Networks 10G Ethernet"
+config TEHUTI_C10GT
+	tristate "Tehuti Networks 10G SFP+ Ethernet NIC"
 	depends on PCI
 	---help---
-	  Tehuti Networks 10G Ethernet NIC
+	  Tehuti Networks 10G SFP+ Ethernet NIC
+
+config TN4011_10GBASET
+	tristate "Tehuti Networks 10G base-T Ethernet NIC"
+	depends on PCI
+	---help---
+	  Tehuti Networks 10G base-T Ethernet NIC
+
+config TN4022_DXE810S
+	tristate "Tehuti Networks for DLINK DXE810S Ethernet NIC"
+	depends on PCI
+	---help---
+	  Tehuti Networks for DLINK DXE810S Ethernet NIC
 
 endif # NET_VENDOR_TEHUTI

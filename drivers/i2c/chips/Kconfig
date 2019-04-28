@@ -1,0 +1,77 @@
+#
+# Thecus I2C chip drivers configuration
+#
+
+menu "Thecus I2C Chip support"
+
+config SENSORS_N16000_IO
+	tristate "Thecus N16000 MB I/O operation"
+	depends on I2C
+	help
+	  If you say yes here you get support for the
+	  Thecus N16000 MB io operation.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called thecus_io.
+
+config SENSORS_N8900_IO
+	tristate "Thecus N8900 MB I/O operation"
+	depends on I2C
+	help
+	  If you say yes here you get support for the
+	  Thecus N8900 MB io operation.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called thecus_io.
+
+config SENSORS_N2800_IO
+	tristate "Thecus N2800 MB I/O operation"
+	depends on I2C
+	help
+	  If you say yes here you get support for the
+	  Thecus N2800 MB io operation.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called thecus_io.
+
+config SENSORS_N7700PRO_IO
+	tristate "Thecus N7700PRO MB I/O operation"
+	depends on I2C
+	help
+	  If you say yes here you get support for the
+	  Thecus N7700PRO MB io operation.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called thecus_io.
+
+config SENSORS_N5810_IO
+        tristate "Thecus N5810 MB I/O operation"
+        depends on I2C
+        help
+          If you say yes here you get support for the
+          Thecus N5810 MB io operation.
+
+          This driver can also be built as a module. If so, the module
+          will be called thecus_io.
+
+config SENSORS_N8950_IO
+        tristate "Thecus N8950 MB I/O operation"
+        depends on I2C
+        help
+          If you say yes here you get support for the
+          Thecus N8910 MB io operation.
+
+          This driver can also be built as a module. If so, the module
+          will be called thecus_io.
+
+config SENSORS_NXXXX_IO
+        tristate "Thecus NXXXX MB I/O operation"
+        select IRQ_DOMAIN
+        help
+          If you say yes here you get support for the
+          Thecus NXXXX MB io operation.
+
+          This driver can also be built as a module. If so, the module
+          will be called thecus_io.
+
+endmenu

@@ -1693,7 +1693,12 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 	*tf = qc->result_tf;
 	err_mask = qc->err_mask;
 
-	ata_qc_free(qc);
+	/* disk access led */
+	if (ap->ops->qc_free)
+		ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
+
 	link->active_tag = preempted_tag;
 	link->sactive = preempted_sactive;
 	ap->qc_active = preempted_qc_active;
@@ -4841,7 +4846,12 @@ struct ata_queued_cmd *ata_qc_new_init(struct ata_device *dev)
 	struct ata_port *ap = dev->link->ap;
 	struct ata_queued_cmd *qc;
 
-	qc = ata_qc_new(ap);
+	/* disk access led */
+	if (ap->ops->qc_new)
+		qc = ap->ops->qc_new(ap);
+	else
+		qc = ata_qc_new(ap);
+
 	if (qc) {
 		qc->scsicmd = NULL;
 		qc->ap = ap;

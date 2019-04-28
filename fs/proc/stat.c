@@ -184,7 +184,7 @@ static int show_stat(struct seq_file *p, void *v)
 
 static int stat_open(struct inode *inode, struct file *file)
 {
-	size_t size = 1024 + 128 * num_possible_cpus();
+	size_t size = 1024 + 128 * num_online_cpus();
 	char *buf;
 	struct seq_file *m;
 	int res;
@@ -193,8 +193,8 @@ static int stat_open(struct inode *inode, struct file *file)
 	size += 2 * nr_irqs;
 
 	/* don't ask for more than the kmalloc() max size */
-	if (size > KMALLOC_MAX_SIZE)
-		size = KMALLOC_MAX_SIZE;
+	if (size > (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER))
+		size = PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER;
 	buf = kmalloc(size, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;

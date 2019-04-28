@@ -36,6 +36,9 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
+/* Thecus /proc/scsi/scsi */
+static char *DISK_IF[] = { "SATA", "SAS", "USB", "iSCSI", "FCoE"};
+static char *LINK_RATE[] = { "1.5", "3", "6", "12"};
 
 /* 4K page size, but our output routines, use some slack for overruns */
 #define PROC_BLOCK_SIZE (3*1024)
@@ -219,6 +222,42 @@ static int proc_print_scsidevice(struct device *dev, void *data)
 		seq_printf(s, " CCS\n");
 	else
 		seq_printf(s, "\n");
+
+	/* Thecus /proc/scsi/scsi */
+	seq_printf(s, "  Thecus: Tray:%d Disk:%s ",sdev->tray_id, sdev->dev_name);
+
+	seq_printf(s, "Model:");
+	for (i = 0; i < 16; i++) {
+		if (sdev->model[i] >= 0x20)
+			seq_printf(s, "%c", sdev->model[i]);
+		else
+			seq_printf(s, " ");
+	}
+	seq_printf(s, " Rev:");
+	for (i = 0; i < 4; i++) {
+		if (sdev->rev[i] >= 0x20)
+			seq_printf(s, "%c", sdev->rev[i]);
+		else
+			seq_printf(s, " ");
+	}
+
+	if(sdev->disk_if < ARRAY_SIZE(DISK_IF))
+		seq_printf(s, " Intf:%s ", DISK_IF[sdev->disk_if]);
+	else {
+		printk(KERN_ERR "ERROR: DISK_IF array index overflow, change to 0\n");
+		seq_printf(s, " Intf:%s ", DISK_IF[0]);
+	}
+        seq_printf(s, " LinkRate:%s ", LINK_RATE[sdev->link_rate]);
+	if(sdev->tray_id < 52)
+		seq_printf(s, "  Loc: Pos:%d", sdev->tray_id);
+	else if(sdev->tray_id < 148)
+		seq_printf(s, "  Loc:%d Pos:%d", sdev->tray_id/26-1, sdev->tray_id%26);
+	else if(sdev->tray_id < 188)
+		seq_printf(s, "  Loc:%d Pos:", sdev->tray_id-183);
+	else
+		seq_printf(s, "  Loc: Pos:");
+
+	seq_printf(s, "\n");
 
 out:
 	return 0;

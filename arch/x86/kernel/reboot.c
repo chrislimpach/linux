@@ -29,6 +29,14 @@
 #include <asm/realmode.h>
 #include <asm/x86_init.h>
 
+#include <linux/thecus_event.h>
+
+/*
+ *  * Thecus Bay Trail reboot patch
+ *   * Current ACPI reboot cause H/W reset in bay trail
+ *    */
+int thecus_acpi_reboot=1;
+
 /*
  * Power off function, if any
  */
@@ -508,6 +516,7 @@ static void native_machine_emergency_restart(void)
 		/* Could also try the reset bit in the Hammer NB */
 		switch (reboot_type) {
 		case BOOT_KBD:
+			pr_notice("BOOT_KBD\n");
 			mach_reboot_fixups(); /* For board specific fixups */
 
 			for (i = 0; i < 10; i++) {
@@ -525,6 +534,7 @@ static void native_machine_emergency_restart(void)
 			break;
 
 		case BOOT_TRIPLE:
+			pr_notice("BOOT_TRIPLE\n");
 			load_idt(&no_idt);
 			__asm__ __volatile__("int3");
 
@@ -532,17 +542,22 @@ static void native_machine_emergency_restart(void)
 			break;
 
 		case BOOT_BIOS:
+			pr_notice("BOOT_BIOS\n");
 			machine_real_restart(MRR_BIOS);
 
 			reboot_type = BOOT_KBD;
 			break;
 
 		case BOOT_ACPI:
-			acpi_reboot();
+			pr_notice("BOOT_ACPI\n");
+
+			if (thecus_acpi_reboot)
+				acpi_reboot(); 
 			reboot_type = BOOT_KBD;
 			break;
 
 		case BOOT_EFI:
+			pr_notice("BOOT_EFI\n");
 			if (efi_enabled(EFI_RUNTIME_SERVICES))
 				efi.reset_system(reboot_mode == REBOOT_WARM ?
 						 EFI_RESET_WARM :
@@ -552,6 +567,7 @@ static void native_machine_emergency_restart(void)
 			break;
 
 		case BOOT_CF9:
+			pr_notice("BOOT_CF9\n");
 			port_cf9_safe = true;
 			/* Fall through */
 

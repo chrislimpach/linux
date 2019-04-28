@@ -1,0 +1,149 @@
+                    tehuti Ethtool Interface
+
+0. ABSTRACT
+
+Ethtool is Linux kernel interface and CLI utility for examining and tuning 
+ethernet-based network interface. See the ethtool(8) man page for more details. 
+This document describes tehuti ethtool interface implementation and gives usage 
+examples.
+
+1. EXAMPLES
+
+1.0 General info query
+
+    Reports device hardware capabilities and current status.
+
+        # ethtool eth2
+        Settings for eth2:
+                Supported ports: [ FIBRE ]
+                Supported link modes:   
+                Supports auto-negotiation: No
+                Advertised link modes:  Not reported
+                Advertised auto-negotiation: No
+                Speed: Unknown! (10000)
+                Duplex: Full
+                Port: FIBRE
+                PHYAD: 0
+                Transceiver: external
+                Auto-negotiation: off
+                Link detected: yes
+
+1.1 Driver info query
+
+    Reports driver versioning. Driver version is svn url/branch, revision 
+    number and clean/modified status. Example driver is from 5.8.3.1-ethtool 
+    branch, revision 415 and it has clean ( not modified ) status
+
+        # ethtool -i eth2
+        driver: tehuti
+        version: branches/5.8.3.1-ethtool R415 C
+        firmware-version: 0bcb2ce5ab6ee9395d42f78b3fd57c9
+        bus-info: 0000:04:00.0
+
+1.2 Coalesce parameters
+
+    Reports device's interrupt coalesing settings. This is the only parameter 
+    which supports set operation in runtime.
+
+    1.2.0 Get operation: 
+
+        # ethtool -c eth2
+        Coalesce parameters for eth2:
+        Adaptive RX: off  TX: off
+        stats-block-usecs: 0
+        sample-interval: 0
+        pkt-rate-low: 0
+        pkt-rate-high: 0
+
+        rx-usecs: 200
+        rx-frames: 512
+        rx-usecs-irq: 0
+        rx-frames-irq: 0
+
+        tx-usecs: 148
+        tx-frames: 256
+        tx-usecs-irq: 0
+        tx-frames-irq: 0
+
+        rx-usecs-low: 0
+        rx-frame-low: 0
+        tx-usecs-low: 0
+        tx-frame-low: 0
+
+        rx-usecs-high: 0
+        rx-frame-high: 0
+        tx-usecs-high: 0
+        tx-frame-high: 0
+
+    1.2.1 Set operation: 
+        # ethtool -C eth2 rx-usecs 400
+
+1.2 Rx/Tx fifo parameter query
+
+    Report current hardware data fifo ( ring ) status. Fifo size in bytes 
+    returned as maximum. Outstanding pending fifo regions in bytes reported
+    as current settings.
+
+        # ethtool -g eth2
+        Ring parameters for eth2:
+        Pre-set maximums:
+        RX:             32768
+        RX Mini:        0
+        RX Jumbo:       0
+        TX:             16384
+        Current hardware settings:
+        RX:             0
+        RX Mini:        0
+        RX Jumbo:       0
+        TX:             0
+
+1.3 Offload parameters query
+
+    Report offload information.
+
+        # ethtool -k eth2
+        Offload parameters for eth2:
+        rx-checksumming: on
+        tx-checksumming: on
+        scatter-gather: on
+        tcp segmentation offload: on
+
+1.4 Statistics query
+
+    Report device-specific L2 statistics.
+
+        # ethtool -S  eth2
+        NIC statistics:
+             aFramesTransmittedOK: 0
+             aFramesReceivedOK: 8
+             aFrameCheckSequenceErrors: 4
+             aAlignmentErrors: 0
+             aTxPAUSEMACCtrlFrames: 0
+             aRxPAUSEMACCtrlFrames: 0
+             aFrameTooLongErrors: 0
+             aInRangeLengthErrors: 0
+             VLANTransmittedOK: 0
+             VLANReceivedOK: 0
+             ifOutOctets: 0
+             ifInOctets: 636
+             ifInUcastPkts: 332
+             ifInMulticastPkts: 4
+             ifInBroadcastPkts: 0
+             ifOutErrors: 0
+             ifOutDiscards: 0
+             ifOutUcastPkts: 0
+             ifOutMulticastPkts: 3
+             ifOutBroadcastPkts: 4
+             etherStatsDropEvents: 1
+             etherStatsOctets: 0
+             etherStatsPkts: 332
+             etherStatsUndersizePkts: 4
+             etherStatsPkts64Octets: 0
+             etherStatsPkts65to127Octets: 2
+             etherStatsPkts128to255Octets: 2
+             etherStatsPkts256to511Octets: 0
+             etherStatsPkts512to1023Octets: 0
+             etherStatsPkts1024to1518Octets: 0
+             etherStatsPkts1519toX: 0
+             etherStatsOversizePkts: 0
+

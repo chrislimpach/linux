@@ -4531,6 +4531,7 @@ static int be_probe(struct pci_dev *pdev, const struct pci_device_id *pdev_id)
 		goto stats_clean;
 
 	be_netdev_init(netdev);
+	strcpy(netdev->name, "geth%d");
 	status = register_netdev(netdev);
 	if (status != 0)
 		goto unsetup;

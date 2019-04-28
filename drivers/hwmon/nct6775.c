@@ -56,10 +56,24 @@
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/acpi.h>
+#include <linux/pci.h>
 #include <linux/io.h>
 #include "lm75.h"
+#include <linux/uaccess.h>
+
+#include <asm/pmc_atom.h>
 
 #define USE_ALTERNATE
+
+#define THECUS_NCT6776 1
+#if THECUS_NCT6776
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#define HWM_DRIVER_NAME "NCT6776"
+#define THECUS_HWM_VER "0.2"
+#endif
+
+static u32 pmc_base_addr;
 
 enum kinds { nct6106, nct6775, nct6776, nct6779, nct6791 };
 
@@ -80,6 +94,15 @@ static unsigned short fan_debounce;
 module_param(fan_debounce, ushort, 0);
 MODULE_PARM_DESC(fan_debounce, "Enable debouncing for fan RPM signal");
 
+/* Default should set 3, but for old f/w we need set 2 */
+static int acloss_type=2;
+module_param(acloss_type, int, 0);
+MODULE_PARM_DESC(acloss_type, "AC power loss 2:(on/off), 3:(off/on/keep)");
+
+static int fan_type=0;
+module_param(fan_type, int, 0);
+MODULE_PARM_DESC(fan_type, "0:baytrail, 1:ASRock E3C22-4L");
+
 #define DRVNAME "nct6775"
 
 /*
@@ -89,6 +112,7 @@ MODULE_PARM_DESC(fan_debounce, "Enable debouncing for fan RPM signal");
 #define NCT6775_LD_ACPI		0x0a
 #define NCT6775_LD_HWM		0x0b
 #define NCT6775_LD_VID		0x0d
+#define NCT6775_LD_DS   	0x16
 
 #define SIO_REG_LDSEL		0x07	/* Logical device select */
 #define SIO_REG_DEVID		0x20	/* Device ID (2 bytes) */
@@ -102,7 +126,40 @@ MODULE_PARM_DESC(fan_debounce, "Enable debouncing for fan RPM signal");
 #define SIO_NCT6791_ID		0xc800
 #define SIO_ID_MASK		0xFFF0
 
+#define NCT6775_REG_DEEPSLEEP      0x30
+#define NCT6775_REG_DEEPS5_OFFSET  0x00
+#define NCT6775_REG_DEEPS5_MASK    0x01
+
+#define NCT6775_REG_ACPI_CRE4H	   0xe4
+#define NCT6775_REG_ACPOWER_OFFSET 0x05
+#define NCT6775_REG_ACPOWER_MASK   0x60
+
+#define BYT_AG3E_MASK 0x0001
+
+#define F75387_CHIP_ID		0x0410
+#define F75387SG1_DEV_ID 	0x5a
+#define F75387SG2_DEV_ID 	0x5c
+#define F75387_FAN1_READ 	0x16
+#define F75387_FAN2_READ 	0x18
+#define F75387_FAN1_WRITE	0x74
+#define F75387_FAN2_WRITE	0x84
+#define F75387_REMOTE_TEMP1	0x14
+#define F75387_REMOTE_TEMP2	0x15
+
 enum pwm_enable { off, manual, thermal_cruise, speed_cruise, sf3, sf4 };
+
+extern int has_ipmi_intf;
+extern int ipmi_cpu_fan_read(void);
+extern int ipmi_cpu_fan_write(unsigned long val);
+extern int ipmi_cpu_temp_read(void);
+extern int ipmi_mb_temp_read(void);
+extern u16 f75387_ipmi_read_chip_id(u8 dev_id);
+extern int f75387_ipmi_read_hdd_fan(u8 dev_id, u8 reg);
+extern int f75387_ipmi_write(u8 dev_id, u8 reg, u8 val);
+extern void f75387_hddfan_initial(u8 dev_id);
+extern int f75387_temp_read(u8 dev_id, u8 reg);
+extern int f75387sg1_rw(u8 reg_num, u8 * val, int wr);
+extern int f75387sg2_rw(u8 reg_num, u8 * val, int wr);
 
 static inline void
 superio_outb(int ioreg, int reg, int val)
@@ -604,6 +661,9 @@ static const u16 NCT6106_REG_AUTO_PWM[] = { 0x164, 0x174, 0x184 };
 
 static const u16 NCT6106_REG_ALARM[NUM_REG_ALARM] = {
 	0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d };
+
+static struct platform_device *pdev[2];
+static int platform_device_index;
 
 static const s8 NCT6106_ALARM_BITS[] = {
 	0, 1, 2, 3, 4, 5, 7, 8,		/* in0.. in7 */
@@ -3267,6 +3327,454 @@ static void add_temp_sensors(struct nct6775_data *data, const u16 *regp,
 	}
 }
 
+//Set Fan Control mode.
+static void thecus_fan_mode_set(void)
+{
+	u8 fan_mode_reg_value = 0x00;
+	u8 orig_reg_value, mask_value, set_reg_value;
+	int bit_n = 4;
+	struct nct6775_data *data = nct6775_update_device(&pdev[platform_device_index]->dev);
+
+	orig_reg_value = nct6775_read_value(data, data->REG_FAN_MODE[0]);
+	mask_value = orig_reg_value & 0x0f;
+	fan_mode_reg_value = fan_mode_reg_value << bit_n;
+	set_reg_value = mask_value | fan_mode_reg_value;
+
+	nct6775_write_value(data, data->REG_FAN_MODE[0], set_reg_value);
+}
+
+static const struct pci_device_id pmc_pci_ids[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_VLV_PMC) },
+	{ 0, },
+};
+
+static int pmc_setup_dev(void)
+{
+	struct pci_dev *pdev = NULL;
+	const struct pci_device_id *ent;
+	void __iomem *pmc_regmap;
+
+	for_each_pci_dev(pdev){
+		ent = pci_match_id(pmc_pci_ids, pdev);
+		if (ent) {
+
+			pci_read_config_dword(pdev, PMC_BASE_ADDR_OFFSET, &pmc_base_addr);
+			pmc_base_addr &= PMC_BASE_ADDR_MASK;
+
+			pmc_regmap = ioremap_nocache(pmc_base_addr, PMC_MMIO_REG_LEN);
+			if (!pmc_regmap) {
+				dev_err(&pdev->dev, "error: ioremap failed\n");
+				return -ENOMEM;
+			}
+		}
+	} 
+	iounmap(pmc_regmap);
+
+	return 1;
+}
+
+static int nct6776_DP_S5_read(struct nct6775_data *data)
+{
+	u8 reg_val;
+	int err;
+
+	err = superio_enter(data->sioreg);
+	if(err)
+		return err;
+
+	superio_select(data->sioreg, NCT6775_LD_DS);
+	reg_val = superio_inb(data->sioreg, NCT6775_REG_DEEPSLEEP);
+	superio_exit(data->sioreg);
+
+	return (reg_val & NCT6775_REG_DEEPS5_MASK) >> NCT6775_REG_DEEPS5_OFFSET;
+}
+
+static int nct6776_DP_S5_write(struct nct6775_data *data, u8 set_val)
+{
+	u8 ori_reg_val, tmp_reg_val, set_reg_val;
+	int err;
+
+	if (set_val > 1 )
+		set_val = 1;	
+
+	err = superio_enter(data->sioreg);
+	if(err)
+		return err;
+
+	superio_select(data->sioreg, NCT6775_LD_DS);
+        ori_reg_val = superio_inb(data->sioreg, NCT6775_REG_DEEPSLEEP);
+	tmp_reg_val = ori_reg_val & ~NCT6775_REG_DEEPS5_MASK;
+	set_reg_val = tmp_reg_val | (set_val << NCT6775_REG_DEEPS5_OFFSET); 
+	superio_outb(data->sioreg, SIO_REG_ENABLE, set_reg_val);
+	superio_exit(data->sioreg);
+
+	return 0;
+}
+
+static int nct6776_ACPower_read(struct nct6775_data *data)
+{
+	u8 reg_val;
+	int err;
+
+	err = superio_enter(data->sioreg);
+	if(err)
+		return err;
+
+	superio_select(data->sioreg, NCT6775_LD_ACPI);
+	reg_val = superio_inb(data->sioreg, NCT6775_REG_ACPI_CRE4H);
+	superio_exit(data->sioreg);
+
+	return (reg_val & NCT6775_REG_ACPOWER_MASK ) >> NCT6775_REG_ACPOWER_OFFSET ;
+}
+
+static int nct6776_ACPower_write(struct nct6775_data *data, u8 set_val)
+{
+	u8 ori_reg_val, tmp_reg_val, set_reg_val;
+	int err;
+
+	if (set_val > 2 )
+		set_val = 2;	
+
+	err = superio_enter(data->sioreg);
+	if(err)
+		return err;
+
+	superio_select(data->sioreg, NCT6775_LD_ACPI);
+        ori_reg_val = superio_inb(data->sioreg, NCT6775_REG_ACPI_CRE4H);
+	tmp_reg_val = ori_reg_val & ~NCT6775_REG_ACPOWER_MASK;
+	set_reg_val = tmp_reg_val | (set_val << NCT6775_REG_ACPOWER_OFFSET); 
+	superio_outb(data->sioreg, NCT6775_REG_ACPI_CRE4H, set_reg_val);
+	superio_exit(data->sioreg);
+
+	return 0;
+}
+
+static int f75387_read_hdd_fan(u8 dev_id, u8 reg){
+	int i,ret=0;
+	u8 val1, val2;
+	int pulse = 1;
+
+        if (dev_id == F75387SG1_DEV_ID){
+		if ((f75387sg1_rw(reg, &val1, 0)) || (f75387sg1_rw(reg+1, &val2, 0))) {
+			return ret;
+		}
+        }else if (dev_id == F75387SG2_DEV_ID){
+		if ((f75387sg2_rw(reg, &val1, 0)) || (f75387sg2_rw(reg+1, &val2, 0))) {
+			return ret;
+		}
+	}
+  
+	i = val1;
+	i = ((i << 8) & 0xff00) | val2;
+	i *= pulse;
+	if (i == 0) i = 1;              
+	if ((i != 0x0FFF) && (i != 0x0FFE))
+		ret=1500000 / i;
+
+	return ret;
+}
+
+static int f75387_read_temp(u8 dev_id, u8 reg){
+	u8 val;
+        if (dev_id == F75387SG1_DEV_ID){
+		f75387sg1_rw(reg, &val, 0);
+        }else if (dev_id == F75387SG2_DEV_ID){
+		f75387sg2_rw(reg, &val, 0);
+	}
+	
+	return (int)val;
+}
+
+static int thecus_proc_nct6776_show(struct seq_file *m, void *v)
+{
+	u32 pm_con1;
+	void __iomem *pmc_regmap;
+
+	struct nct6775_data *data = nct6775_update_device(&pdev[platform_device_index]->dev);
+
+	seq_printf(m,"Display NCT6775 Info Ver.%s\n", THECUS_HWM_VER);
+	seq_printf(m,"Sensor type = %d,AC Loss type = %d\n", fan_type,acloss_type);
+        if (fan_type == 2){
+                //Show fan speed
+                seq_printf(m,"CPU_FAN RPM: %d\n", data->rpm[1]);
+                seq_printf(m,"SYS_FAN0 RPM: %d\n", data->rpm[0]);
+                seq_printf(m,"SYS_FAN1 RPM: %d\n", data->rpm[2]);
+                seq_printf(m,"SYS_FAN2 RPM: %d\n", data->rpm[3]);
+                seq_printf(m,"SYS_FAN3 RPM: %d\n", data->rpm[4]);
+                seq_printf(m,"SYS_FAN4 RPM: %d\n", data->rpm[5]);
+                seq_printf(m,"HDD_FAN1 RPM: %d\n", f75387_read_hdd_fan(F75387SG1_DEV_ID, F75387_FAN1_READ));
+                seq_printf(m,"HDD_FAN2 RPM: %d\n", f75387_read_hdd_fan(F75387SG1_DEV_ID, F75387_FAN2_READ));
+                seq_printf(m,"HDD_FAN3 RPM: %d\n", f75387_read_hdd_fan(F75387SG2_DEV_ID, F75387_FAN1_READ));
+                seq_printf(m,"HDD_FAN4 RPM: %d\n", f75387_read_hdd_fan(F75387SG2_DEV_ID, F75387_FAN2_READ));
+		//Show temperature
+		seq_printf(m,"CPU_TEMP: %d\n", LM75_TEMP_FROM_REG(data->temp[0][0])/1000);
+		seq_printf(m,"SAS_TEMP: %d\n", LM75_TEMP_FROM_REG(data->temp[0][1])/1000);
+		seq_printf(m,"SYS_TEMP: %d\n", 0);
+                seq_printf(m,"HDD_TEMP1: %d\n", f75387_read_temp(F75387SG1_DEV_ID, F75387_REMOTE_TEMP1));
+                seq_printf(m,"HDD_TEMP2: %d\n", f75387_read_temp(F75387SG1_DEV_ID, F75387_REMOTE_TEMP2));
+                seq_printf(m,"HDD_TEMP3: %d\n", f75387_read_temp(F75387SG2_DEV_ID, F75387_REMOTE_TEMP1));
+                seq_printf(m,"HDD_TEMP4: %d\n", f75387_read_temp(F75387SG2_DEV_ID, F75387_REMOTE_TEMP2));
+        }else if (fan_type == 1){
+		//Show fan speed
+		seq_printf(m,"CPU_FAN RPM: %d\n", ipmi_cpu_fan_read()*100);
+		seq_printf(m,"SYS_FAN0 RPM: %d\n", data->rpm[0]);
+		seq_printf(m,"SYS_FAN1 RPM: %d\n", data->rpm[1]);
+		seq_printf(m,"SYS_FAN2 RPM: %d\n", data->rpm[2]);
+		seq_printf(m,"SYS_FAN3 RPM: %d\n", data->rpm[3]);
+		seq_printf(m,"SYS_FAN4 RPM: %d\n", data->rpm[4]);
+		seq_printf(m,"SYS_FAN5 RPM: %d\n", data->rpm[5]);
+		seq_printf(m,"HDD_FAN1 RPM: %d\n", f75387_ipmi_read_hdd_fan(F75387SG1_DEV_ID, F75387_FAN1_READ));
+		seq_printf(m,"HDD_FAN2 RPM: %d\n", f75387_ipmi_read_hdd_fan(F75387SG1_DEV_ID, F75387_FAN2_READ));
+		seq_printf(m,"HDD_FAN3 RPM: %d\n", f75387_ipmi_read_hdd_fan(F75387SG2_DEV_ID, F75387_FAN1_READ));
+		seq_printf(m,"HDD_FAN4 RPM: %d\n", f75387_ipmi_read_hdd_fan(F75387SG2_DEV_ID, F75387_FAN2_READ));
+		//Show temperature
+		seq_printf(m,"CPU_TEMP: %d\n", ipmi_cpu_temp_read());
+		seq_printf(m,"SAS_TEMP: %d\n", ipmi_mb_temp_read());
+		seq_printf(m,"SYS_TEMP: %d\n", 0);
+		seq_printf(m,"HDD_TEMP1: %d\n", f75387_temp_read(F75387SG1_DEV_ID, F75387_REMOTE_TEMP1));
+		seq_printf(m,"HDD_TEMP2: %d\n", f75387_temp_read(F75387SG1_DEV_ID, F75387_REMOTE_TEMP2));
+		seq_printf(m,"HDD_TEMP3: %d\n", f75387_temp_read(F75387SG2_DEV_ID, F75387_REMOTE_TEMP1));
+		seq_printf(m,"HDD_TEMP4: %d\n", f75387_temp_read(F75387SG2_DEV_ID, F75387_REMOTE_TEMP2));
+        }else{
+		//Show fan speed
+		seq_printf(m,"CPU_FAN RPM: %d\n", 0);
+		seq_printf(m,"SYS_FAN1 RPM: %d\n", 0);
+		seq_printf(m,"SYS_FAN2 RPM: %d\n", 0);
+		seq_printf(m,"HDD_FAN1 RPM: %d\n", data->rpm[0]);
+		seq_printf(m,"HDD_FAN2 RPM: %d\n", 0);
+		seq_printf(m,"HDD_FAN3 RPM: %d\n", 0);
+		seq_printf(m,"HDD_FAN4 RPM: %d\n", 0);
+		//Show temperature
+		seq_printf(m,"CPU_TEMP: %d\n", LM75_TEMP_FROM_REG(data->temp[0][1])/1000);
+		seq_printf(m,"SAS_TEMP: %d\n", LM75_TEMP_FROM_REG(data->temp[0][2])/1000);
+		seq_printf(m,"SYS_TEMP: %d\n", LM75_TEMP_FROM_REG(data->temp[0][0])/1000);
+		seq_printf(m,"HDD_TEMP1: %d\n", 0);
+		seq_printf(m,"HDD_TEMP2: %d\n", 0);
+	}
+	//Show ACPower
+	if (acloss_type == 2) {
+	        pmc_regmap = ioremap_nocache(pmc_base_addr, PMC_MMIO_REG_LEN);
+        	if (pmc_regmap == NULL)
+                	return -ENOMEM;
+		pm_con1 = readl(pmc_regmap + GEN_PMCON1);
+        	iounmap(pmc_regmap);
+		seq_printf(m, "ACPWR: %d\n", pm_con1 & BYT_AG3E_MASK );
+        } else {
+		seq_printf(m, "ACPWR: %d\n", nct6776_ACPower_read(data));
+        }
+	//Show Deep S5
+	/* ASRock model doesn't support EUP function */
+	if (fan_type != 1) {
+		seq_printf(m, "EUP: %d\n", nct6776_DP_S5_read(data));
+	}
+
+	return 0;
+}
+
+static int thecus_proc_nct6776_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, thecus_proc_nct6776_show, NULL);
+}
+
+static ssize_t thecus_proc_nct6776_write(struct file *file, const char __user *buf,
+		size_t length, loff_t *ppos)
+{
+	char *buffer;
+	int i,ret=0,v0,v1,v2,val1=0;
+	u8 reg=0, msb, lsb;
+	u32 pm_con1,pm_con1_val;
+	void __iomem *pmc_regmap;
+
+	struct nct6775_data *data = nct6775_update_device(&pdev[platform_device_index]->dev);
+
+	if(!buf || length > PAGE_SIZE)
+		return -EINVAL;
+
+	buffer = (char *)__get_free_page(GFP_KERNEL);
+	if(! buffer)
+		return -ENOMEM;
+
+	ret=-EFAULT;
+	if (copy_from_user(buffer, buf, length))
+		goto out;
+
+	ret=-EINVAL;
+	if (length < PAGE_SIZE)
+		buffer[length] = '\0';
+	else if (buffer[PAGE_SIZE-1])
+		goto out;
+
+	if (!strncmp(buffer, "REG", strlen("REG"))){
+		i = sscanf(buffer + strlen("REG"), "%d %x %x\n", &v0, &v1, &v2);
+		//R/W: 0/1 : v0
+		//Reg addr : v1
+		//Reg Value : v2
+		if (i >= 2 && i <= 3){
+			mutex_lock(&data->update_lock);
+			if(v0 == 1){
+				//Write value into reg.
+				nct6775_write_value(data, v1, v2);
+			}else{
+				//Read the value from reg.
+				reg = nct6775_read_value(data, v1);
+				printk("Read reg 0x%02x=0x%02x(%d)\n",v1,reg,reg);
+			}
+			mutex_unlock(&data->update_lock);
+		}
+		ret=0;
+	}else if (!strncmp(buffer, "DUMP", strlen("DUMP"))){
+		i = sscanf(buffer + strlen("DUMP"), "%x %x\n", &v0, &v1);
+
+		printk("Dump Registers from 0x%02X to 0x%02X...\n",v0,v1);
+		if(i == 2){
+			mutex_lock(&data->update_lock);
+			for(i=v0; i<=v1; i++)
+			{
+				//read the data of register
+				//printk("REG 0x%02X=0x%+02X\n",i,reg);
+				printk("DUMP TESTING !!");
+			}
+			mutex_unlock(&data->update_lock);
+		}
+		ret=0;
+	}else if (!strncmp(buffer, "ACPWR", strlen("ACPWR"))){
+		i = sscanf(buffer + strlen("ACPWR"), "%d\n", &v0);
+		if (i == 1){
+			val1=v0;
+			mutex_lock(&data->update_lock);
+			if (acloss_type == 2) { /* 2 status (on/off) */
+				nct6776_ACPower_write(data, 0x01);
+			        pmc_regmap = ioremap_nocache(pmc_base_addr, PMC_MMIO_REG_LEN);
+        			if (pmc_regmap == NULL)
+			                return -ENOMEM;
+				pm_con1 = readl(pmc_regmap + GEN_PMCON1);
+				/* printk("PMCON1=%x\n",pm_con1); */
+				if(val1 == 0){
+					printk("ACPWR=%d, always off\n",val1);
+					pm_con1_val = pm_con1 | 0x00000001;
+				        /* printk("PMCON1=%x\n",pm_con1_val); */
+					writel(pm_con1_val, pmc_regmap + GEN_PMCON1);
+				}else if (val1 == 1){
+					printk("ACPWR=%d, always on\n",val1);
+					pm_con1_val = pm_con1 & 0xFFFFFFFE;
+				        /* printk("PMCON1=%x\n",pm_con1_val); */
+					writel(pm_con1_val, pmc_regmap + GEN_PMCON1);
+				}else{
+					printk("ACPWR=%d, but driver only support on/off\n",val1);
+				}
+				iounmap(pmc_regmap);
+			} else { /* Default 3 status (off/on/keep) */
+				if (v0 == 0) {
+					ret=nct6776_ACPower_write(data, 0x00);
+					printk("ACPWR=%d, always off\n", nct6776_ACPower_read(data));
+				} else if (v0 == 1) {
+					ret=nct6776_ACPower_write(data, 0x01);
+					printk("ACPWR=%d, always on\n", nct6776_ACPower_read(data));
+				} else {
+					ret=nct6776_ACPower_write(data, 0x02);
+					printk("ACPWR=%d, keep last status\n", nct6776_ACPower_read(data));
+				}
+			}
+			ret=0;
+			mutex_unlock(&data->update_lock);
+		}
+	}else if (!strncmp(buffer, "EUP", strlen("EUP"))){
+		i = sscanf(buffer + strlen("EUP"), "%d\n", &v0);
+		/* ASRock model doesn't support EUP function */
+		if (i == 1 && fan_type != 1){
+			mutex_lock(&data->update_lock);
+			if (v0 == 0) {
+				ret=nct6776_DP_S5_write(data, 0x00);
+			} else if (v0 == 1) {
+				ret=nct6776_DP_S5_write(data, 0x01);
+			} else {
+				printk("DEEP S5=%d, Keep last status\n", nct6776_DP_S5_read(data));
+				ret=0;
+			}
+			mutex_unlock(&data->update_lock);
+		}
+	/* v0 => 0/1 = read/write; v1 => setting value(0x01~0x64) */
+	}else if (!strncmp(buffer, "CPUFAN", strlen("CPUFAN")) && fan_type == 1){
+		i = sscanf(buffer + strlen("CPUFAN"), "%d %x\n", &v0, &v1);
+		if (i == 2){
+			mutex_lock(&data->update_lock);
+			if (v0 == 1){
+				ipmi_cpu_fan_write(v1);
+			}else{
+				printk("CPU FAN = %d RPM\n", ipmi_cpu_fan_read());
+			}
+			ret=0;
+			mutex_unlock(&data->update_lock);
+		}
+	/* v0 -> HDD Number; v1 -> Expected FAN count(0x0~0xfff) */
+	}else if (!strncmp(buffer, "HDDFAN", strlen("HDDFAN")) && fan_type == 1){
+		i = sscanf(buffer + strlen("HDDFAN"), "%d %x\n", &v0, &v1);
+		if (i == 2){
+			if (v1 >= 0){
+				msb = v1 >> 8;
+				lsb = v1 & 0xff;
+				mutex_lock(&data->update_lock);
+				switch(v0){
+				case 1:
+					f75387_ipmi_write(F75387SG1_DEV_ID, F75387_FAN1_WRITE, msb);
+					f75387_ipmi_write(F75387SG1_DEV_ID, F75387_FAN1_WRITE+1, lsb);
+					break;
+				case 2:
+					f75387_ipmi_write(F75387SG1_DEV_ID, F75387_FAN2_WRITE, msb);
+					f75387_ipmi_write(F75387SG1_DEV_ID, F75387_FAN2_WRITE+1, lsb);
+					break;
+				case 3:
+					f75387_ipmi_write(F75387SG2_DEV_ID, F75387_FAN1_WRITE, msb);
+					f75387_ipmi_write(F75387SG2_DEV_ID, F75387_FAN1_WRITE+1, lsb);
+					break;
+				case 4:
+					f75387_ipmi_write(F75387SG2_DEV_ID, F75387_FAN2_WRITE, msb);
+					f75387_ipmi_write(F75387SG2_DEV_ID, F75387_FAN2_WRITE+1, lsb);
+					break;
+				}
+				ret=0;
+				mutex_unlock(&data->update_lock);
+			}else{
+				printk("NCT6776: Please type the valid FAN count value.\n");
+				ret=-1;
+				goto out;
+			}
+		}
+	}
+out:
+	free_page((unsigned long)buffer);
+	if(ret>=0)
+		return length;
+	else
+		return -EINVAL;
+}
+
+
+static struct file_operations thecus_proc_nct6776_operations = {
+	.open           = thecus_proc_nct6776_open,
+	.read           = seq_read,
+	.write          = thecus_proc_nct6776_write,
+	.llseek         = seq_lseek,
+	.release        = single_release,
+};
+
+static int thecus_nct6776_init_procfs(void)
+{
+	struct proc_dir_entry *pde;
+
+	pde = proc_create("hwm", 0, NULL, &thecus_proc_nct6776_operations);
+	if (pde == NULL) {
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void thecus_nct6776_exit_procfs(void)
+{
+    remove_proc_entry("hwm", NULL);
+}
+
 static int nct6775_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -3628,8 +4136,8 @@ static int nct6775_probe(struct platform_device *pdev)
 		data->REG_FAN_PULSES = NCT6779_REG_FAN_PULSES;
 		data->FAN_PULSE_SHIFT = NCT6775_FAN_PULSE_SHIFT;
 		data->REG_FAN_TIME[0] = NCT6775_REG_FAN_STOP_TIME;
-		data->REG_FAN_TIME[1] = NCT6776_REG_FAN_STEP_UP_TIME;
-		data->REG_FAN_TIME[2] = NCT6776_REG_FAN_STEP_DOWN_TIME;
+		data->REG_FAN_TIME[1] = NCT6775_REG_FAN_STEP_UP_TIME;
+		data->REG_FAN_TIME[2] = NCT6775_REG_FAN_STEP_DOWN_TIME;
 		data->REG_TOLERANCE_H = NCT6776_REG_TOLERANCE_H;
 		data->REG_PWM[0] = NCT6775_REG_PWM;
 		data->REG_PWM[1] = NCT6775_REG_FAN_START_OUTPUT;
@@ -4128,13 +4636,24 @@ static int __init nct6775_find(int sioaddr, struct nct6775_sio_data *sio_data)
 	return addr;
 }
 
+/* Verify the Chip ID of f75387. (ret=> 0/1 = pass/fail) */
+static int check_f75387_chip_id(void)
+{
+	int ret;
+	if ((f75387_ipmi_read_chip_id(F75387SG1_DEV_ID) == F75387_CHIP_ID) && \
+		(f75387_ipmi_read_chip_id(F75387SG2_DEV_ID) == F75387_CHIP_ID)){
+		ret=0;
+	}else
+		ret=1;
+	return ret;
+}
+
 /*
  * when Super-I/O functions move to a separate file, the Super-I/O
  * bus will manage the lifetime of the device and this module will only keep
  * track of the nct6775 driver. But since we use platform_device_alloc(), we
  * must keep track of the device
  */
-static struct platform_device *pdev[2];
 
 static int __init sensors_nct6775_init(void)
 {
@@ -4195,12 +4714,35 @@ static int __init sensors_nct6775_init(void)
 		err = platform_device_add(pdev[i]);
 		if (err)
 			goto exit_device_put;
+		if(! platform_device_index)
+			platform_device_index=i;
 	}
 	if (!found) {
 		err = -ENODEV;
 		goto exit_unregister;
 	}
-
+#if THECUS_NCT6776
+	//Set the default SYSFAN mode.
+	thecus_fan_mode_set();
+	pmc_setup_dev();
+	if (has_ipmi_intf == 1){
+		if (check_f75387_chip_id()){
+			printk("%s: F75387 Chip ID is wrong, fail to create /proc/hwm.\n", HWM_DRIVER_NAME);
+			return -ENOENT;
+		}else{
+			/* Initialize HDD FAN2 to ensure that system can control each HDD FAN2. */
+			f75387_hddfan_initial(F75387SG1_DEV_ID);
+			f75387_hddfan_initial(F75387SG2_DEV_ID);
+		}
+	}	
+	//Create Proc file
+	if (thecus_nct6776_init_procfs()){
+		printk(KERN_ERR "%s: cannot create /proc/hwm .\n",HWM_DRIVER_NAME);
+		return -ENOENT;
+	}else{
+		printk(KERN_INFO "%s Loaded on /proc/hwm .\n",HWM_DRIVER_NAME);
+	}
+#endif	
 	return 0;
 
 exit_device_put:
@@ -4216,6 +4758,11 @@ exit_unregister:
 static void __exit sensors_nct6775_exit(void)
 {
 	int i;
+
+
+#if THECUS_NCT6776
+	thecus_nct6776_exit_procfs();
+#endif
 
 	for (i = 0; i < ARRAY_SIZE(pdev); i++) {
 		if (pdev[i])

@@ -678,9 +678,9 @@ iblock_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 		 */
 		if (q->flush_flags & REQ_FUA) {
 			if (cmd->se_cmd_flags & SCF_FUA)
-				rw = WRITE_FUA;
+				rw = WRITE_SYNC; /* turn off REQ_FUA from iSCSI target block I/O */
 			else if (!(q->flush_flags & REQ_FLUSH))
-				rw = WRITE_FUA;
+				rw = WRITE_SYNC; /* turn off REQ_FUA from iSCSI target block I/O */
 			else
 				rw = WRITE;
 		} else {

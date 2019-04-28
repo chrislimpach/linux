@@ -47,6 +47,13 @@
 #include "ahci.h"
 #include "libata.h"
 
+/* disk access led */
+#define LED_OFF         0x0
+#define LED_ON          0x1
+extern void thecus_disk_access(int index,int act);
+static struct ata_queued_cmd* ahci_qc_new(struct ata_port *ap);
+static void ahci_qc_free(struct ata_queued_cmd *qc);
+
 static int ahci_skip_host_reset;
 int ahci_ignore_sss;
 EXPORT_SYMBOL_GPL(ahci_ignore_sss);
@@ -151,6 +158,12 @@ struct ata_port_operations ahci_ops = {
 	.qc_prep		= ahci_qc_prep,
 	.qc_issue		= ahci_qc_issue,
 	.qc_fill_rtf		= ahci_qc_fill_rtf,
+
+/* disk access led */
+#if defined(CONFIG_SENSORS_N2800_IO) || defined(CONFIG_SENSORS_N2800_IO_MODULE)
+	.qc_new			= ahci_qc_new,
+	.qc_free		= ahci_qc_free,
+#endif
 
 	.freeze			= ahci_freeze,
 	.thaw			= ahci_thaw,
@@ -1514,6 +1527,70 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 	else
 		return sata_pmp_qc_defer_cmd_switch(qc);
 }
+
+/* disk access led */
+#if defined(CONFIG_SENSORS_N2800_IO)|| defined(CONFIG_SENSORS_N2800_IO_MODULE)
+/*
+ *	ata_qc_new - Request an available ATA command, for queueing
+ *	@ap: Port associated with device @dev
+ *	@dev: Device from whom we request an available command structure
+ *
+ *	LOCKING:
+ *	None.
+ */
+static struct ata_queued_cmd *ahci_qc_new(struct ata_port *ap)
+{
+	struct ata_queued_cmd *qc = NULL;
+	unsigned int i;
+
+	/* no command while frozen */
+	if (unlikely(ap->pflags & ATA_PFLAG_FROZEN))
+		return NULL;
+
+	/* the last tag is reserved for internal command. */
+	for (i = 0; i < ATA_MAX_QUEUE - 1; i++)
+		if (!test_and_set_bit(i, &ap->qc_allocated)) {
+			qc = __ata_qc_from_tag(ap, i);
+			break;
+		}
+
+	/* disk light off */
+	thecus_disk_access(ap->scsi_host->host_no,LED_OFF);
+
+	if (qc)
+		qc->tag = i;
+	return qc;
+}
+
+/*
+ *	ata_qc_free - free unused ata_queued_cmd
+ *	@qc: Command to complete
+ *
+ *	Designed to free unused ata_queued_cmd object
+ *	in case something prevents using it.
+ *
+ *	LOCKING:
+ *	spin_lock_irqsave(host lock)
+ */
+
+void ahci_qc_free(struct ata_queued_cmd *qc)
+{
+	struct ata_port *ap = qc->ap;
+	unsigned int tag;
+
+	WARN_ON(qc == NULL);	/* ata_qc_from_tag _might_ return NULL */
+
+	qc->flags = 0;
+	tag = qc->tag;
+	if (likely(ata_tag_valid(tag))) {
+		qc->tag = ATA_TAG_POISON;
+		clear_bit(tag, &ap->qc_allocated);
+
+		/* disk light on */
+ 		thecus_disk_access(ap->scsi_host->host_no,LED_ON);
+	}
+}
+#endif
 
 static void ahci_qc_prep(struct ata_queued_cmd *qc)
 {

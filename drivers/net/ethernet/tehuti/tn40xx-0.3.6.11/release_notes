@@ -1,0 +1,111 @@
+
+Initial version 0.3.6.6 11/6/13
+=================================
+
+- DEV-ID : 4020, SubDEV-ID: 3015   Interface CX4
+- DEV-ID : 4011, SubDEV-ID: 3015   Interface 10GBASE_T Teranetics PHY
+- DEV-ID : 4022, SubDEV-ID: 3015   Interface SFP+
+- DEV-ID : 4024, SubDEV-ID: 3015   Interface 10GBASE_T Marvell PHY
+
+- Kernel versions supported: 2.6.24-3.8
+
+Version 0.3.6.7 3/7/13
+======================
+
+- Load MAC FW at initialization time (insmod)
+- Reduced module memory footprint by freeing PHY and MAC FW memory file after initialization phase.
+
+Version 0.3.6.7 16/7/13
+=======================
+
+- Added suspend/resume support to make install
+
+Version 0.3.6.7 17/7/13
+=======================
+
+- Fixed MODPOST warnings.
+- Added retry to QT2025 sfp+ link change.
+
+Version 0.3.6.7 24/7/13
+======================
+
+- Added retry to CX4 link change.
+
+Version 0.3.6.7 29/7/13
+======================
+
+- Support RHEL >= 6.3 
+
+Version 0.3.6.7 4/8/13
+======================
+
+- Support MAC flow control
+
+Version 0.3.6.8 12/8/13
+======================
+
+- Fixed MTU bug
+
+Version 0.3.6.9 20/8/13
+=======================
+
+- Reduced memory foot print (by MAC FW size)
+
+Version 0.3.6.10 13/10/13
+=========================
+
+- Ethtool support update
+
+Version 0.3.6.10 21/10/13
+=========================
+
+- Multiple cards support
+
+Version 0.3.6.10 22/10/13
+=========================
+
+- Kernel 3.11 support
+
+Version 0.3.6.10 3/11/13
+=========================
+
+- Work around false tcp checksum error 
+
+Version 0.3.6.10 4/11/13
+=========================
+
+- Marvell PHY FW 2.4.1.0
+
+Version 0.3.6.11 8/12/13
+=========================
+
+- SFP+ 1G modules support
+- Ethtool rx checksum report fix
+
+Version 0.3.6.11 17/12/13
+=========================
+
+- New MDIO
+
+Version 0.3.6.11 25/12/13
+=========================
+
+- bdx_skb_rx_add_frag() 
+- Receive buffer allocation low memory warning
+- Makefile checks is /etc/pm exists
+
+Version 0.3.6.11 7/1/14
+=========================
+
+- Fixed VLAN bug
+
+Version 0.3.6.11 10/4/14
+=========================
+
+- Removed TN2080 PHY support
+- Added WARNING compilation flag.
+  (The default release version does not display warnings unless compiled with #define WARNING)
+- Work around H/W UDP checksum false err.
+- support ethtool -p for kernel version < 3.0
+
+

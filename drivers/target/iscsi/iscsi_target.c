@@ -2826,6 +2826,12 @@ iscsit_build_logout_rsp(struct iscsi_cmd *cmd, struct iscsi_conn *conn,
 		cmd->init_task_tag, cmd->stat_sn, hdr->response,
 		cmd->logout_cid, conn->cid);
 
+        if ((conn->login_ip) && (conn->sess) && (conn->sess->sess_ops) && (conn->sess->sess_ops->TargetName) && (conn->sess->sess_ops->InitiatorName)){
+                printk(KERN_DEBUG "iSCSI logout. |%s|%s|%s\n",conn->login_ip,conn->sess->sess_ops->TargetName,conn->sess->sess_ops->InitiatorName);
+        } else {
+                printk(KERN_DEBUG "iSCSI logout. |||\n");
+        }
+
 	return 0;
 }
 EXPORT_SYMBOL(iscsit_build_logout_rsp);
@@ -3382,6 +3388,7 @@ iscsit_build_sendtargets_response(struct iscsi_cmd *cmd,
 	int target_name_printed;
 	unsigned char buf[ISCSI_IQN_LEN+12]; /* iqn + "TargetName=" + \0 */
 	unsigned char *text_in = cmd->text_in_ptr, *text_ptr = NULL;
+	int kk=0;
 
 	buffer_len = max(conn->conn_ops->MaxRecvDataSegmentLength,
 			 SENDTARGETS_BUF_LIMIT);
@@ -3410,6 +3417,7 @@ iscsit_build_sendtargets_response(struct iscsi_cmd *cmd,
 		text_ptr += 1;
 	}
 
+	printk(KERN_INFO "login_ip: %s, local_ip:%s , buffer_len=%d\n", conn->login_ip, conn->local_ip, buffer_len);
 	spin_lock(&tiqn_lock);
 	list_for_each_entry(tiqn, &g_tiqn_list, tiqn_list) {
 		if ((cmd->cmd_flags & IFC_SENDTARGETS_SINGLE) &&
@@ -3451,9 +3459,33 @@ iscsit_build_sendtargets_response(struct iscsi_cmd *cmd,
 				if (np->np_network_transport != network_transport)
 					continue;
 
-				if (!target_name_printed) {
-					len = sprintf(buf, "TargetName=%s",
-						      tiqn->tiqn);
+				/* extract login's local ip, let it be the first
+				 * fix the ordering of target address list, let the client connect ip be th FIRST */
+				if(memcmp(conn->local_ip,np->np_ip,strlen(np->np_ip)) == 0) {
+					if (!target_name_printed) {
+						len = sprintf(buf, "TargetName=%s",
+							      tiqn->tiqn);
+						len += 1;
+	
+						if ((len + payload_len) > buffer_len) {
+							spin_unlock(&tpg->tpg_np_lock);
+							spin_unlock(&tiqn->tiqn_tpg_lock);
+							end_of_buf = 1;
+							goto eob;
+						}
+						memcpy(payload + payload_len, buf, len);
+						payload_len += len;
+						target_name_printed = 1;
+					}
+
+	                                len = sprintf(buf, "TargetAddress="
+        	                                "%s:%hu,%hu",
+                	                        (inaddr_any == false) ?
+                        	                        np->np_ip : conn->local_ip,
+                                	        (inaddr_any == false) ?
+                                        	        np->np_port : conn->local_port,
+	                                        tpg->tpgt);
+
 					len += 1;
 
 					if ((len + payload_len) > buffer_len) {
@@ -3464,26 +3496,54 @@ iscsit_build_sendtargets_response(struct iscsi_cmd *cmd,
 					}
 					memcpy(payload + payload_len, buf, len);
 					payload_len += len;
-					target_name_printed = 1;
-				}
+				} else continue;
+			}
+			list_for_each_entry(tpg_np, &tpg->tpg_gnp_list,
+						tpg_np_list) {
+				struct iscsi_np *np = tpg_np->tpg_np;
+				bool inaddr_any = iscsit_check_inaddr_any(np);
 
-				len = sprintf(buf, "TargetAddress="
-					"%s:%hu,%hu",
-					(inaddr_any == false) ?
-						np->np_ip : conn->local_ip,
-					(inaddr_any == false) ?
-						np->np_port : conn->local_port,
-					tpg->tpgt);
-				len += 1;
+				if (np->np_network_transport != network_transport)
+					continue;
 
-				if ((len + payload_len) > buffer_len) {
-					spin_unlock(&tpg->tpg_np_lock);
-					spin_unlock(&tiqn->tiqn_tpg_lock);
-					end_of_buf = 1;
-					goto eob;
+				/* extract login's local ip, let it be the first */
+				if(memcmp(conn->local_ip,np->np_ip,strlen(np->np_ip)) == 0) continue;
+				else {
+					if (!target_name_printed) {
+						len = sprintf(buf, "TargetName=%s",
+							      tiqn->tiqn);
+						len += 1;
+	
+						if ((len + payload_len) > buffer_len) {
+							spin_unlock(&tpg->tpg_np_lock);
+							spin_unlock(&tiqn->tiqn_tpg_lock);
+							end_of_buf = 1;
+							goto eob;
+						}
+						memcpy(payload + payload_len, buf, len);
+						payload_len += len;
+						target_name_printed = 1;
+					}
+
+	                                len = sprintf(buf, "TargetAddress="
+        	                                "%s:%hu,%hu",
+                	                        (inaddr_any == false) ?
+                        	                        np->np_ip : conn->local_ip,
+                                	        (inaddr_any == false) ?
+                                        	        np->np_port : conn->local_port,
+	                                        tpg->tpgt);
+
+					len += 1;
+
+					if ((len + payload_len) > buffer_len) {
+						spin_unlock(&tpg->tpg_np_lock);
+						spin_unlock(&tiqn->tiqn_tpg_lock);
+						end_of_buf = 1;
+						goto eob;
+					}
+					memcpy(payload + payload_len, buf, len);
+					payload_len += len;
 				}
-				memcpy(payload + payload_len, buf, len);
-				payload_len += len;
 			}
 			spin_unlock(&tpg->tpg_np_lock);
 		}
@@ -3496,6 +3556,10 @@ eob:
 			break;
 	}
 	spin_unlock(&tiqn_lock);
+
+	printk(KERN_INFO "payload_len: %d,payload: \n", payload_len);
+	for(kk=0; kk<payload_len; kk++) printk("%c", payload[kk]);
+	printk(KERN_INFO "\n");
 
 	cmd->buf_ptr = payload;
 

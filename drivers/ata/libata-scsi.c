@@ -1113,6 +1113,8 @@ static int ata_scsi_dev_config(struct scsi_device *sdev,
 			       struct ata_device *dev)
 {
 	struct request_queue *q = sdev->request_queue;
+	struct ata_link *link = ata_dev_phys_link(dev);
+	u32 sstatus,tmp;
 
 	if (!ata_id_has_unload(dev->id))
 		dev->flags |= ATA_DFLAG_NO_UNLOAD;
@@ -1167,6 +1169,12 @@ static int ata_scsi_dev_config(struct scsi_device *sdev,
 	}
 
 	blk_queue_flush_queueable(q, false);
+
+	/* AHCI disk link rate support */
+	sata_scr_read(link, SCR_STATUS, &sstatus);
+	tmp = ((sstatus >> 4) & 0xf);
+	if (tmp > 0) tmp = tmp - 1;
+		sdev->link_rate=tmp;
 
 	dev->sdev = sdev;
 	return 0;
@@ -1780,7 +1788,11 @@ static void ata_scsi_qc_complete(struct ata_queued_cmd *qc)
 
 	qc->scsidone(cmd);
 
-	ata_qc_free(qc);
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
 }
 
 /**
@@ -1852,13 +1864,25 @@ static int ata_scsi_translate(struct ata_device *dev, struct scsi_cmnd *cmd,
 	return 0;
 
 early_finish:
-	ata_qc_free(qc);
+
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
+
 	cmd->scsi_done(cmd);
 	DPRINTK("EXIT - early finish (good or error)\n");
 	return 0;
 
 err_did:
-	ata_qc_free(qc);
+
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
+
 	cmd->result = (DID_ERROR << 16);
 	cmd->scsi_done(cmd);
 err_mem:
@@ -1866,7 +1890,13 @@ err_mem:
 	return 0;
 
 defer:
-	ata_qc_free(qc);
+
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
+
 	DPRINTK("EXIT - defer\n");
 	if (rc == ATA_DEFER_LINK)
 		return SCSI_MLQUEUE_DEVICE_BUSY;
@@ -2551,7 +2581,12 @@ static void atapi_sense_complete(struct ata_queued_cmd *qc)
 	}
 
 	qc->scsidone(qc->scsicmd);
-	ata_qc_free(qc);
+
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
 }
 
 /* is it pointless to prefer PIO for "safety reasons"? */
@@ -2648,7 +2683,13 @@ static void atapi_qc_complete(struct ata_queued_cmd *qc)
 
 		qc->scsicmd->result = SAM_STAT_CHECK_CONDITION;
 		qc->scsidone(cmd);
-		ata_qc_free(qc);
+
+		/*  disk access led  */
+		if (qc->ap->ops->qc_free)
+			qc->ap->ops->qc_free(qc);
+		else
+ 			ata_qc_free(qc);
+
 		return;
 	}
 
@@ -2693,7 +2734,13 @@ static void atapi_qc_complete(struct ata_queued_cmd *qc)
 	}
 
 	qc->scsidone(cmd);
-	ata_qc_free(qc);
+
+	/*  disk access led  */
+	if (qc->ap->ops->qc_free)
+		qc->ap->ops->qc_free(qc);
+	else
+ 		ata_qc_free(qc);
+
 }
 /**
  *	atapi_xlat - Initialize PACKET taskfile
